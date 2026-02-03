@@ -6,7 +6,7 @@ interface MusicPlayerProps {
   musicUrl?: string;
   onTimeUpdate?: (time: number) => void;
   performanceTitle?: string;
-  audioRef?: React.RefObject<HTMLAudioElement>;
+  audioRef?: React.RefObject<HTMLAudioElement | null>;
   onAudioReady?: (audio: HTMLAudioElement | null) => void;
 }
 
@@ -17,7 +17,7 @@ export function MusicPlayer({
   audioRef: externalAudioRef,
   onAudioReady,
 }: MusicPlayerProps) {
-  const internalAudioRef = useRef<HTMLAudioElement>(null);
+  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioRef = externalAudioRef ?? internalAudioRef;
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);

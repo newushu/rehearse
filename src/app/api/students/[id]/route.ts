@@ -4,13 +4,14 @@ import { NextRequest, NextResponse } from "next/server";
 // GET single student
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { data, error } = await supabase
       .from("students")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", id)
       .single();
 
     if (error) throw error;
@@ -28,15 +29,16 @@ export async function GET(
 // UPDATE student
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { name, email } = await request.json();
 
     const { data, error } = await supabase
       .from("students")
       .update({ name, email })
-      .eq("id", params.id)
+      .eq("id", id)
       .select();
 
     if (error) throw error;

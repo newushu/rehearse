@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
       const { data: performance, error: perfError } = await supabase
       .from("performances")
-      .select("id,title,description,date,location,call_time,phone_numbers,stage_orientation,music_file_path,music_file_name")
+      .select("id,title,description,date,location,call_time,phone_numbers,stage_orientation,timezone,music_file_path,music_file_name")
       .eq("id", performanceId)
       .single();
 

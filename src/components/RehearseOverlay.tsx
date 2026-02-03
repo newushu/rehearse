@@ -39,6 +39,7 @@ interface RehearseOverlayProps {
 const GRID_COLS = 12;
 const GRID_ROWS = 8;
 const CELL_SIZE = 68;
+type FrontDirection = "bottom" | "top";
 
 function getInitials(name: string) {
   if (!name) return "?";
@@ -262,7 +263,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: Reh
         });
         setSubpartsByPart(subpartsMap);
 
-        const allSubpartIds = subpartsEntries.flatMap(([, list]) => list.map((s) => s.id));
+        const allSubpartIds = subpartsEntries.flatMap(([, list]) => list.map((s: SubpartItem) => s.id));
         const assignmentEntries = await Promise.all(
           allSubpartIds.map(async (subpartId) => {
             const res = await fetch(`/api/subpart-order?subpartId=${subpartId}`);

@@ -22,8 +22,8 @@ export function StageGrid({ partId, onPositionChange }: StageGridProps) {
         const response = await fetch(`/api/stage-positions?partId=${partId}`);
         if (!response.ok) throw new Error("Failed to fetch positions");
         const data = await response.json();
-        const map = new Map(
-          data.map((pos: StagePosition, idx: number) => [idx, pos])
+        const map = new Map<number, StagePosition>(
+          (data as StagePosition[]).map((pos, idx) => [idx, pos])
         );
         setPositions(map);
       } catch (error) {

@@ -4,15 +4,16 @@ import { NextRequest, NextResponse } from "next/server";
 // UPDATE stage position
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { x, y, student_id } = await request.json();
 
     const { data, error } = await supabase
       .from("stage_positions")
       .update({ x, y, student_id, updated_at: new Date() })
-      .eq("id", params.id)
+      .eq("id", id)
       .select();
 
     if (error) throw error;
@@ -30,13 +31,14 @@ export async function PUT(
 // DELETE stage position
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { error } = await supabase
       .from("stage_positions")
       .delete()
-      .eq("id", params.id);
+      .eq("id", id);
 
     if (error) throw error;
 

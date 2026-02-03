@@ -763,7 +763,7 @@ interface RehearsalsTabContentProps {
   rehearsals: any[];
   showForm: boolean;
   onToggleForm: () => void;
-  onCreateRehearsal: (title: string, dateEntries: Array<{ date: string; time: string; location: string }>) => Promise<void>;
+  onCreateRehearsal: (title: string, dateEntries: Array<{ date: string; time: string; location: string }>) => Promise<any[]>;
   onDeleteRehearsal: (id: string) => Promise<void>;
   onUpdateRehearsal: (id: string, updates: { title: string; date: string; time: string; location: string }) => Promise<void>;
 }
