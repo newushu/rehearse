@@ -414,7 +414,7 @@ function MySignups({}: MySignupsProps) {
         <div className="text-center py-12 text-gray-600">Loading...</div>
       ) : signups.length === 0 ? (
         <div className="text-center py-12">
-          <p className="text-gray-600">You haven't signed up for any performances yet.</p>
+          <p className="text-gray-600">You haven&apos;t signed up for any performances yet.</p>
         </div>
       ) : (
         <div className="space-y-4">

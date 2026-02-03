@@ -408,7 +408,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                         <h3 className="text-xl font-bold text-gray-900 mb-4">Part Timepoints</h3>
                         <div className="space-y-3">
                           <p className="text-gray-600 text-sm">
-                            Click "Edit" on a part to set its music timepoint (when the part should appear during rehearsal).
+                            Click &quot;Edit&quot; on a part to set its music timepoint (when the part should appear during rehearsal).
                           </p>
                           <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
                             <p className="font-semibold text-blue-900 mb-2">📋 Parts Timeline:</p>
