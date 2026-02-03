@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { usePerformances } from "@/hooks/usePerformances";
 import { StudentPositioningView } from "@/components/StudentPositioningView";
 import { AppBrand } from "@/components/AppBrand";
@@ -438,11 +438,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showPositioningView, setShowPositioningView] = useState(false);
 
-  useEffect(() => {
-    fetchPositioning();
-  }, [signup.id]);
-
-  const fetchPositioning = async () => {
+  const fetchPositioning = useCallback(async () => {
     try {
       setLoadingPos(true);
       // Get all parts for this performance
@@ -483,7 +479,11 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     } finally {
       setLoadingPos(false);
     }
-  };
+  }, [signup.performance_id, signup.student_id]);
+
+  useEffect(() => {
+    fetchPositioning();
+  }, [fetchPositioning]);
 
   if (showPositioningView) {
     return (

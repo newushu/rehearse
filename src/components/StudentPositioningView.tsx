@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AppLogo } from "@/components/AppLogo";
 
 interface StudentPosition {
@@ -29,11 +29,7 @@ export function StudentPositioningView({
   const [loading, setLoading] = useState(true);
   const [selectedPartIndex, setSelectedPartIndex] = useState(0);
 
-  useEffect(() => {
-    fetchPositions();
-  }, [performanceId, studentId]);
-
-  const fetchPositions = async () => {
+  const fetchPositions = useCallback(async () => {
     try {
       setLoading(true);
       // Get performance with parts
@@ -68,7 +64,11 @@ export function StudentPositioningView({
     } finally {
       setLoading(false);
     }
-  };
+  }, [performanceId, studentId]);
+
+  useEffect(() => {
+    fetchPositions();
+  }, [fetchPositions]);
 
   if (loading) {
     return <div className="text-center py-8">Loading your positions...</div>;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { SoloAssignment } from "@/types";
 
 interface RosterStudent {
@@ -33,13 +33,7 @@ export function SoloAssignmentsPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!partId || isGroup) return;
-    fetchRoster();
-    fetchAssignments();
-  }, [performanceId, partId, isGroup]);
-
-  const fetchRoster = async () => {
+  const fetchRoster = useCallback(async () => {
     try {
       const res = await fetch(`/api/performances/${performanceId}/roster`);
       if (!res.ok) throw new Error("Failed to fetch roster");
@@ -48,9 +42,9 @@ export function SoloAssignmentsPanel({
     } catch (err) {
       console.error("Error fetching roster:", err);
     }
-  };
+  }, [performanceId]);
 
-  const fetchAssignments = async () => {
+  const fetchAssignments = useCallback(async () => {
     try {
       const res = await fetch(`/api/solo-assignments?partId=${partId}`);
       if (!res.ok) throw new Error("Failed to fetch solo assignments");
@@ -59,7 +53,13 @@ export function SoloAssignmentsPanel({
     } catch (err) {
       console.error("Error fetching solo assignments:", err);
     }
-  };
+  }, [partId]);
+
+  useEffect(() => {
+    if (!partId || isGroup) return;
+    fetchRoster();
+    fetchAssignments();
+  }, [fetchRoster, fetchAssignments, partId, isGroup]);
 
   const availableStudents = useMemo(() => {
     return roster.filter((student) => student.part_id === partId || !student.part_id);

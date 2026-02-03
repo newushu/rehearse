@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface SubpartItem {
   id: string;
@@ -59,7 +59,7 @@ export function SubpartsPanel({ partId }: SubpartsPanelProps) {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const fetchSubparts = async () => {
+  const fetchSubparts = useCallback(async () => {
     if (!partId) {
       setSubparts([]);
       return;
@@ -75,11 +75,11 @@ export function SubpartsPanel({ partId }: SubpartsPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [partId]);
 
   useEffect(() => {
     fetchSubparts();
-  }, [partId]);
+  }, [fetchSubparts]);
 
   if (!partId) {
     return null;

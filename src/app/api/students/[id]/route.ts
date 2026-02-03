@@ -56,13 +56,14 @@ export async function PUT(
 // DELETE student
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { error } = await supabase
       .from("students")
       .delete()
-      .eq("id", params.id);
+      .eq("id", id);
 
     if (error) throw error;
 
