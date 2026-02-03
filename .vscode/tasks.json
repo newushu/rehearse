@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Next.js Dev Server",
+			"type": "shell",
+			"command": "cmd /c install.bat && npm run dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Next.js Dev Server",
+			"type": "shell",
+			"command": "cmd /c C:\\Users\\calvi\\Desktop\\PerfTool\\dev.bat",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
