@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { AppLogo } from "@/components/AppLogo";
 
 interface RosterStudent {
@@ -86,7 +86,7 @@ export function PositioningPanel({
   const [flipHorizontal, setFlipHorizontal] = useState(false);
   const [applyingQuick, setApplyingQuick] = useState(false);
 
-  const fetchSubparts = async () => {
+  const fetchSubparts = useCallback(async () => {
     try {
       const subRes = await fetch(`/api/subparts?partId=${partId}`);
       if (subRes.ok) {
@@ -99,7 +99,7 @@ export function PositioningPanel({
     } catch (err) {
       console.error("Error fetching subparts:", err);
     }
-  };
+  }, [partId]);
 
   // Fetch roster, existing positions, and performance orientation
   useEffect(() => {
@@ -151,7 +151,7 @@ export function PositioningPanel({
     }
 
     fetchData();
-  }, [performanceId, partId, isGroup]);
+  }, [performanceId, partId, isGroup, fetchSubparts]);
 
   useEffect(() => {
     setPartNameDraft(partName || "");
@@ -233,14 +233,6 @@ export function PositioningPanel({
 
     fetchSubpartData();
   }, [selectedSubpartId]);
-
-  useEffect(() => {
-    if (!selectedSubpartId) return;
-    const positionsList = subpartPositions[selectedSubpartId] || [];
-    const items = subpartOrder[selectedSubpartId] || [];
-    if (positionsList.length === 0) return;
-    addMissingAssignedFromPositions(positionsList, items);
-  }, [selectedSubpartId, subpartPositions, subpartOrder]);
 
   // Auto-save effect
   useEffect(() => {
@@ -468,7 +460,7 @@ export function PositioningPanel({
     }
   };
 
-  const persistOrder = async (items: Array<{ id: string; student_id: string; student_name: string }>) => {
+  const persistOrder = useCallback(async (items: Array<{ id: string; student_id: string; student_name: string }>) => {
     if (!selectedSubpartId) return;
     setSubpartOrder((prev) => ({ ...prev, [selectedSubpartId]: items }));
     await fetch("/api/subpart-order", {
@@ -482,7 +474,7 @@ export function PositioningPanel({
         }))
       ),
     });
-  };
+  }, [selectedSubpartId]);
 
   const addToOrder = async (studentId: string, studentName: string) => {
     if (!selectedSubpartId) return;
@@ -490,7 +482,7 @@ export function PositioningPanel({
     await persistOrder(next);
   };
 
-  const addMissingAssignedFromPositions = async (
+  const addMissingAssignedFromPositions = useCallback(async (
     positionsList: PositionEntry[],
     currentItems: Array<{ id: string; student_id: string; student_name: string }>
   ) => {
@@ -506,7 +498,15 @@ export function PositioningPanel({
     if (missing.length === 0) return;
     const next = [...currentItems, ...missing];
     await persistOrder(next);
-  };
+  }, [persistOrder, selectedSubpartId]);
+
+  useEffect(() => {
+    if (!selectedSubpartId) return;
+    const positionsList = subpartPositions[selectedSubpartId] || [];
+    const items = subpartOrder[selectedSubpartId] || [];
+    if (positionsList.length === 0) return;
+    addMissingAssignedFromPositions(positionsList, items);
+  }, [selectedSubpartId, subpartPositions, subpartOrder, addMissingAssignedFromPositions]);
 
   const loadSourcePositions = async () => {
     if (!selectedSourceKey) return [];

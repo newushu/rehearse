@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 
 export function LogoUpload() {
@@ -68,7 +69,14 @@ export function LogoUpload() {
       {logoUrl && (
         <div className="mb-4 flex items-center gap-4">
           <div className="w-16 h-16 rounded-lg border border-gray-200 bg-white flex items-center justify-center overflow-hidden">
-            <img src={logoUrl} alt="App logo preview" className="max-w-full max-h-full object-contain" />
+            <Image
+              src={logoUrl}
+              alt="App logo preview"
+              width={64}
+              height={64}
+              unoptimized
+              className="max-w-full max-h-full object-contain"
+            />
           </div>
           <div className="text-sm text-gray-600">
             <div className="font-semibold text-gray-900">Current Logo</div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { AppLogo } from "@/components/AppLogo";
 import { useRehearsals } from "@/hooks/useRehearsals";
 import { Rehearsal, RehearsalAttendance } from "@/types";
@@ -41,35 +41,7 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
 
   const { rehearsals } = useRehearsals(performanceId);
 
-  useEffect(() => {
-    fetchRoster();
-  }, [performanceId]);
-
-  useEffect(() => {
-    fetchAttendance();
-  }, [performanceId]);
-
-  useEffect(() => {
-    const fetchPerformance = async () => {
-      if (!performanceId) return;
-      try {
-        const res = await fetch(`/api/performances/${performanceId}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        setPerformanceDate(data?.date || "");
-      } catch (err) {
-        console.error("Error fetching performance date:", err);
-      }
-    };
-    fetchPerformance();
-  }, [performanceId]);
-
-  useEffect(() => {
-    if (!showAddForm) return;
-    fetchAllStudents();
-  }, [showAddForm]);
-
-  const fetchRoster = async () => {
+  const fetchRoster = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`/api/performances/${performanceId}/roster`);
@@ -82,20 +54,9 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [performanceId]);
 
-  const fetchAllStudents = async () => {
-    try {
-      const response = await fetch("/api/students");
-      if (!response.ok) throw new Error("Failed to fetch students");
-      const data = await response.json();
-      setAllStudents(data);
-    } catch (err) {
-      console.error("Error fetching students:", err);
-    }
-  };
-
-  const fetchAttendance = async () => {
+  const fetchAttendance = useCallback(async () => {
     if (!performanceId) return;
     try {
       setAttendanceLoading(true);
@@ -112,7 +73,46 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
     } finally {
       setAttendanceLoading(false);
     }
-  };
+  }, [performanceId]);
+
+  useEffect(() => {
+    fetchRoster();
+  }, [fetchRoster]);
+
+  useEffect(() => {
+    fetchAttendance();
+  }, [fetchAttendance]);
+
+  useEffect(() => {
+    const fetchPerformance = async () => {
+      if (!performanceId) return;
+      try {
+        const res = await fetch(`/api/performances/${performanceId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setPerformanceDate(data?.date || "");
+      } catch (err) {
+        console.error("Error fetching performance date:", err);
+      }
+    };
+    fetchPerformance();
+  }, [performanceId]);
+
+  const fetchAllStudents = useCallback(async () => {
+    try {
+      const response = await fetch("/api/students");
+      if (!response.ok) throw new Error("Failed to fetch students");
+      const data = await response.json();
+      setAllStudents(data);
+    } catch (err) {
+      console.error("Error fetching students:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showAddForm) return;
+    fetchAllStudents();
+  }, [showAddForm, fetchAllStudents]);
 
   const handleRemoveStudent = async (signupId: string) => {
     try {
@@ -222,23 +222,26 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
     return map;
   }, [attendance]);
 
-  const normalizeDateOnly = (value: string) => {
+  const normalizeDateOnly = useCallback((value: string) => {
     if (!value) return "";
     return value.split("T")[0];
-  };
+  }, []);
 
-  const toLocalDate = (value: string) => {
-    const dateOnly = normalizeDateOnly(value);
-    if (!dateOnly) return new Date(value);
-    const [y, m, d] = dateOnly.split("-").map(Number);
-    return new Date(y, (m || 1) - 1, d || 1);
-  };
+  const toLocalDate = useCallback(
+    (value: string) => {
+      const dateOnly = normalizeDateOnly(value);
+      if (!dateOnly) return new Date(value);
+      const [y, m, d] = dateOnly.split("-").map(Number);
+      return new Date(y, (m || 1) - 1, d || 1);
+    },
+    [normalizeDateOnly]
+  );
 
   const sortedRehearsals = useMemo(() => {
     return [...rehearsals].sort(
       (a, b) => toLocalDate(a.date).getTime() - toLocalDate(b.date).getTime()
     );
-  }, [rehearsals]);
+  }, [rehearsals, toLocalDate]);
 
   const isFutureRehearsal = (rehearsal: Rehearsal) => {
     const rehearsalDate = toLocalDate(rehearsal.date);

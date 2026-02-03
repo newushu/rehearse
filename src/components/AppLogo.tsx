@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
 
 interface AppLogoProps {
@@ -39,9 +40,12 @@ export function AppLogo({
       style={{ width: size, height: size, borderRadius: 8 }}
     >
       {logoUrl ? (
-        <img
+        <Image
           src={logoUrl}
           alt="App logo"
+          width={size}
+          height={size}
+          unoptimized
           className={`max-w-full max-h-full object-contain ${imgClassName}`}
         />
       ) : (

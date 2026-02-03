@@ -790,7 +790,11 @@ function RehearsalsTabContent({
 
       {showForm && (
         <div className="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
-          <RehearsalForm onSubmit={onCreateRehearsal} />
+          <RehearsalForm
+            onSubmit={async (title, dateEntries) => {
+              await onCreateRehearsal(title, dateEntries);
+            }}
+          />
         </div>
       )}
 
