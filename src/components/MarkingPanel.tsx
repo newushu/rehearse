@@ -1,15 +1,14 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MusicPlayer } from "@/components/MusicPlayer";
+import { Part } from "@/types";
 
-interface PartItem {
-  id: string;
-  name: string;
+type PartItem = Part & {
   timepoint_seconds?: number | null;
   timepoint_end_seconds?: number | null;
   timeline_row?: number | null;
-}
+};
 
 interface SubpartItem {
   id: string;
@@ -219,12 +218,12 @@ useEffect(() => {
     setSessionTitle(title);
   }, [performanceTitle, customTitle]);
 
-  const getPartStartEnd = (part: PartItem) => {
+  const getPartStartEnd = useCallback((part: PartItem) => {
     const override = partTimelineOverrides[part.id];
     const start = override?.start ?? part.timepoint_seconds ?? null;
     const end = override?.end ?? part.timepoint_end_seconds ?? null;
     return { start, end };
-  };
+  }, [partTimelineOverrides]);
 
   const setPartStartEnd = (partId: string, start: number | null, end: number | null) => {
     setPartTimelineOverrides((prev) => ({
@@ -480,7 +479,8 @@ useEffect(() => {
     };
 
     assigned.forEach((item) => {
-      const overrideRow = partRowOverrides[item.id] ?? part.timeline_row ?? undefined;
+      const sourcePart = parts.find((p) => p.id === item.id);
+      const overrideRow = partRowOverrides[item.id] ?? sourcePart?.timeline_row ?? undefined;
       if (overrideRow !== undefined) {
         ensureRow(overrideRow);
         rows[overrideRow].items.push(item);
@@ -510,7 +510,7 @@ useEffect(() => {
     }
 
     return { rows, unassigned, autoRowCount };
-  }, [parts, partTimelineOverrides, manualRowCount, partRowOverrides]);
+  }, [parts, manualRowCount, partRowOverrides, getPartStartEnd]);
 
   const normalizeAssignments = (rowsSnapshot: MarkRow[], raw: Record<string, AssignmentValue>) => {
     const normalized: Record<string, AssignmentValue> = {};

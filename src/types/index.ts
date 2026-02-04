@@ -27,6 +27,9 @@ export interface Part {
   description: string;
   order: number;
   is_group?: boolean | null;
+  timepoint_seconds?: number | null;
+  timepoint_end_seconds?: number | null;
+  timeline_row?: number | null;
   created_at: string;
 }
 

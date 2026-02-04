@@ -30,12 +30,13 @@ export function LocationAutocompleteInput({
     loadGooglePlaces(apiKey)
       .then(() => {
         if (!inputRef.current) return;
-        autocomplete = new window.google.maps.places.Autocomplete(inputRef.current, {
+        const instance = new window.google.maps.places.Autocomplete(inputRef.current, {
           types: ["geocode"],
           fields: ["formatted_address", "name"],
         });
-        autocomplete.addListener("place_changed", () => {
-          const place = autocomplete?.getPlace();
+        autocomplete = instance;
+        instance.addListener("place_changed", () => {
+          const place = instance.getPlace();
           const next = place?.formatted_address || place?.name || "";
           if (next) {
             onChange(next);
