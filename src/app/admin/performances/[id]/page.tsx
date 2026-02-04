@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useRehearsals } from "@/hooks/useRehearsals";
 import { useParts } from "@/hooks/useParts";
@@ -16,6 +16,17 @@ import { MusicPlayer } from "@/components/MusicPlayer";
 import { RehearseOverlay } from "@/components/RehearseOverlay";
 import { AppBrand } from "@/components/AppBrand";
 import { SubpartsPanel } from "@/components/SubpartsPanel";
+import { AdminSignOutButton } from "@/components/AdminSignOutButton";
+import { LocationAutocompleteInput } from "@/components/LocationAutocompleteInput";
+import { MarkingPanel } from "@/components/MarkingPanel";
+import { loadDraft, saveDraft } from "@/lib/draftStorage";
+import {
+  formatDateTimeLocalInTimeZone,
+  formatDisplayDateTime,
+  getCallTimeFromDateTimeLocal,
+  isCallTimeLocked,
+  zonedDateTimeLocalToUtcIso,
+} from "@/lib/datetime";
 
 interface PageProps {
   params: Promise<{
@@ -25,9 +36,24 @@ interface PageProps {
 
 export default function PerformanceDetailPage({ params }: PageProps) {
   const { id } = use(params);
+  const defaultInfoForm = {
+    title: "",
+    call_time: "",
+    timezone: "America/New_York",
+    date: "",
+    location: "",
+    description: "",
+    phone_numbers: "",
+  };
+  const infoDraftKey = `rehearse:performance-info:${id}`;
+  const initialDraft = loadDraft<{
+    infoForm: typeof defaultInfoForm;
+    callTimeManual: boolean;
+    savedAt: string;
+  }>(infoDraftKey);
   const [performance, setPerformance] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rehearsals" | "parts" | "positioning" | "music" | "info">("rehearsals");
+  const [activeTab, setActiveTab] = useState<"rehearsals" | "parts" | "positioning" | "music" | "info" | "marking">("rehearsals");
   const [showRehearsalForm, setShowRehearsalForm] = useState(false);
   const [showPartForm, setShowPartForm] = useState(false);
   const [selectedPartForPositioning, setSelectedPartForPositioning] = useState<string | null>(null);
@@ -37,15 +63,15 @@ export default function PerformanceDetailPage({ params }: PageProps) {
   const [embedAudioExport, setEmbedAudioExport] = useState(true);
   const [infoSaving, setInfoSaving] = useState(false);
   const [infoError, setInfoError] = useState<string | null>(null);
-  const [infoForm, setInfoForm] = useState({
-    title: "",
-    call_time: "",
-    timezone: "America/New_York",
-    date: "",
-    location: "",
-    description: "",
-    phone_numbers: "",
-  });
+  const [infoForm, setInfoForm] = useState(initialDraft?.infoForm || defaultInfoForm);
+  const [infoCallTimeManual, setInfoCallTimeManual] = useState(
+    initialDraft?.callTimeManual ?? false
+  );
+  const [infoDraftSavedAt, setInfoDraftSavedAt] = useState<string | null>(
+    initialDraft?.savedAt || null
+  );
+  const infoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hasInfoDraftRef = useRef(!!initialDraft);
   const [contacts, setContacts] = useState<any[]>([]);
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
@@ -56,18 +82,8 @@ export default function PerformanceDetailPage({ params }: PageProps) {
   const { parts, createPart, deletePart, setParts } = useParts(id);
   const { performances } = usePerformances();
 
-  const toLocalInputValue = (iso: string) => {
-    const date = new Date(iso);
-    const tzOffset = date.getTimezoneOffset() * 60000;
-    const local = new Date(date.getTime() - tzOffset);
-    return local.toISOString().slice(0, 16);
-  };
-
-  const formatLocalDateTime = (value: string, timeZone?: string) => {
-    if (!value) return "—";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-    return date.toLocaleString(undefined, { timeZone: timeZone || "America/New_York", timeZoneName: "short" });
+  const toLocalInputValue = (iso: string, timeZone?: string) => {
+    return formatDateTimeLocalInTimeZone(iso, timeZone || "America/New_York");
   };
 
   useEffect(() => {
@@ -77,16 +93,20 @@ export default function PerformanceDetailPage({ params }: PageProps) {
         if (!response.ok) throw new Error("Failed to fetch performance");
         const data = await response.json();
         setPerformance(data);
-        const localDate = data.date ? toLocalInputValue(data.date) : "";
-        setInfoForm({
-          title: data.title || "",
-          call_time: data.call_time || "",
-          timezone: data.timezone || "America/New_York",
-          date: localDate,
-          location: data.location || "",
-          description: data.description || "",
-          phone_numbers: data.phone_numbers || "",
-        });
+        const timeZone = data.timezone || "America/New_York";
+        const localDate = data.date ? toLocalInputValue(data.date, timeZone) : "";
+        if (!hasInfoDraftRef.current) {
+          setInfoForm({
+            title: data.title || "",
+            call_time: data.call_time || (localDate ? getCallTimeFromDateTimeLocal(localDate) : ""),
+            timezone: timeZone,
+            date: localDate,
+            location: data.location || "",
+            description: data.description || "",
+            phone_numbers: data.phone_numbers || "",
+          });
+          setInfoCallTimeManual(!!data.call_time);
+        }
         if (data.music_file_path) {
           const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/performance-music/${data.music_file_path}`;
           setMusicUrl(publicUrl);
@@ -112,11 +132,32 @@ export default function PerformanceDetailPage({ params }: PageProps) {
   }, [id]);
 
   useEffect(() => {
+    if (infoSaveTimeoutRef.current) clearTimeout(infoSaveTimeoutRef.current);
+    infoSaveTimeoutRef.current = setTimeout(() => {
+      const savedAt = new Date().toISOString();
+      saveDraft(infoDraftKey, {
+        infoForm,
+        callTimeManual: infoCallTimeManual,
+        savedAt,
+      });
+      setInfoDraftSavedAt(savedAt);
+    }, 400);
+    return () => {
+      if (infoSaveTimeoutRef.current) clearTimeout(infoSaveTimeoutRef.current);
+    };
+  }, [infoForm, infoCallTimeManual, infoDraftKey]);
+
+  useEffect(() => {
     if (activeTab !== "positioning") return;
     if (parts.length > 0 && !selectedPartForPositioning) {
       setSelectedPartForPositioning(parts[0].id);
     }
   }, [activeTab, parts, selectedPartForPositioning]);
+
+  const callTimeLocked = useMemo(
+    () => isCallTimeLocked(infoForm.date, infoForm.timezone),
+    [infoForm.date, infoForm.timezone]
+  );
 
   const handleExportRehearse = async () => {
     try {
@@ -180,6 +221,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
             <Link href="/admin" className="hover:bg-blue-800 px-3 py-2 rounded">
               Admin Panel
             </Link>
+            <AdminSignOutButton className="px-3 py-2 bg-blue-700 rounded hover:bg-blue-600 text-sm" />
           </div>
         </div>
       </nav>
@@ -192,7 +234,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
 
         {/* Main Content */}
         <div className="flex-1 min-w-0 p-6">
-          <div className={`${activeTab === "positioning" ? "max-w-none mx-0" : "max-w-5xl mx-auto"}`}>
+          <div className={`${activeTab === "positioning" || activeTab === "marking" ? "max-w-none mx-0" : "max-w-5xl mx-auto"}`}>
             {/* Header */}
             <div className="mb-8">
               <Link href="/admin" className="text-blue-600 hover:underline mb-4 block">
@@ -204,7 +246,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
               <div className="grid grid-cols-2 gap-4 text-gray-600">
                 <div>
                   <span className="font-semibold">Date:</span>{" "}
-                  {infoForm.date ? formatLocalDateTime(infoForm.date, infoForm.timezone) : "—"}
+                  {performance?.date ? formatDisplayDateTime(performance.date, infoForm.timezone) : "—"}
                 </div>
                 <div>
                   <span className="font-semibold">Location:</span> {performance.location}
@@ -266,6 +308,16 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                 }`}
               >
                 Music & Rehearse
+              </button>
+              <button
+                onClick={() => setActiveTab("marking")}
+                className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+                  activeTab === "marking"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                Marking
               </button>
               <button
                 onClick={() => setActiveTab("info")}
@@ -433,6 +485,15 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                     )}
                   </div>
                 )}
+                {activeTab === "marking" && (
+                  <MarkingPanel
+                    performanceId={id}
+                    parts={parts}
+                    musicUrl={musicUrl}
+                    performanceTitle={performance?.title}
+                    onPartsUpdated={(updated) => setParts(updated)}
+                  />
+                )}
                 {activeTab === "info" && (
                   <div className="space-y-6">
                     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -440,6 +501,11 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                       {infoError && (
                         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
                           {infoError}
+                        </div>
+                      )}
+                      {infoDraftSavedAt && (
+                        <div className="text-xs text-gray-500 mb-3">
+                          Draft saved {new Date(infoDraftSavedAt).toLocaleString()}.
                         </div>
                       )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -457,7 +523,19 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                           <input
                             type="datetime-local"
                             value={infoForm.date}
-                            onChange={(e) => setInfoForm((prev) => ({ ...prev, date: e.target.value }))}
+                            onChange={(e) => {
+                              const nextDate = e.target.value;
+                              setInfoForm((prev) => ({
+                                ...prev,
+                                date: nextDate,
+                                call_time: infoCallTimeManual
+                                  ? prev.call_time
+                                  : getCallTimeFromDateTimeLocal(nextDate),
+                              }));
+                              if (!infoCallTimeManual && !nextDate) {
+                                setInfoForm((prev) => ({ ...prev, call_time: "" }));
+                              }
+                            }}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
@@ -466,9 +544,18 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                           <input
                             type="time"
                             value={infoForm.call_time}
-                            onChange={(e) => setInfoForm((prev) => ({ ...prev, call_time: e.target.value }))}
+                            onChange={(e) => {
+                              setInfoCallTimeManual(true);
+                              setInfoForm((prev) => ({ ...prev, call_time: e.target.value }));
+                            }}
+                            disabled={callTimeLocked}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
+                          {callTimeLocked && (
+                            <div className="text-xs text-amber-700 mt-1">
+                              Call time is locked within 1 hour of the performance.
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="block text-gray-700 font-semibold mb-2">Timezone</label>
@@ -482,10 +569,9 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-gray-700 font-semibold mb-2">Location</label>
-                          <input
-                            type="text"
+                          <LocationAutocompleteInput
                             value={infoForm.location}
-                            onChange={(e) => setInfoForm((prev) => ({ ...prev, location: e.target.value }))}
+                            onChange={(value) => setInfoForm((prev) => ({ ...prev, location: value }))}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
@@ -679,7 +765,9 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({
                                   title: infoForm.title,
-                                  date: infoForm.date ? new Date(infoForm.date).toISOString() : null,
+                                  date: infoForm.date
+                                    ? zonedDateTimeLocalToUtcIso(infoForm.date, infoForm.timezone)
+                                    : null,
                                   call_time: infoForm.call_time,
                                   timezone: infoForm.timezone,
                                   location: infoForm.location,
@@ -698,6 +786,9 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                                 title: updated.title || "",
                                 call_time: updated.call_time || "",
                                 timezone: updated.timezone || prev.timezone,
+                                date: updated.date
+                                  ? toLocalInputValue(updated.date, updated.timezone || prev.timezone)
+                                  : prev.date,
                               }));
                               const contactsRes = await fetch(`/api/performance-contacts?performanceId=${id}`);
                               if (contactsRes.ok) {
@@ -753,6 +844,11 @@ export default function PerformanceDetailPage({ params }: PageProps) {
             parts={parts}
             musicUrl={musicUrl}
             onClose={() => setShowRehearseOverlay(false)}
+            onUpdatePartTimepoints={(updatedPart) => {
+              setParts((prev) =>
+                prev.map((part) => (part.id === updatedPart.id ? { ...part, ...updatedPart } : part))
+              );
+            }}
           />
         )}
     </div>
@@ -839,6 +935,7 @@ function PartsTabContent({
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
+  const [compactParts, setCompactParts] = useState(true);
 
   const availableSources = (performances || []).filter(
     (perf: any) => perf.id !== performanceId
@@ -926,12 +1023,20 @@ function PartsTabContent({
 
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Parts & Choreography</h2>
-        <button
-          onClick={onToggleForm}
-          className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
-        >
-          {showForm ? "Cancel" : "+ Add Part"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCompactParts((prev) => !prev)}
+            className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold text-sm"
+          >
+            {compactParts ? "Expand Details" : "Compact View"}
+          </button>
+          <button
+            onClick={onToggleForm}
+            className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
+          >
+            {showForm ? "Cancel" : "+ Add Part"}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -950,9 +1055,12 @@ function PartsTabContent({
           performanceId={performanceId}
           onDelete={onDeletePart}
           onReorder={onReorderParts}
+          compact={compactParts}
         />
       )}
     </div>
   );
 }
+
+
 

@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { LocationAutocompleteInput } from "@/components/LocationAutocompleteInput";
+import { clearDraft, loadDraft, saveDraft } from "@/lib/draftStorage";
+import { getCallTimeFromDateTimeLocal } from "@/lib/datetime";
 
 interface PerformanceFormProps {
   onSubmit: (entries: Array<{
@@ -16,6 +19,9 @@ interface PerformanceFormProps {
 
 export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceFormProps) {
   const DEFAULT_TIMEZONE = "America/New_York";
+  const DRAFT_KEY = "rehearse:performance-form";
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [entries, setEntries] = useState([
     {
       title: "",
@@ -23,15 +29,48 @@ export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceForm
       date: "",
       location: "",
       call_time: "",
+      call_time_manual: false,
       timezone: DEFAULT_TIMEZONE,
       rehearsals: [] as Array<{ title: string; date: string; time: string; location: string }>,
     },
   ]);
   const [error, setError] = useState<string | null>(null);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    const stored = loadDraft<{ entries: typeof entries; savedAt: string }>(DRAFT_KEY);
+    if (stored?.entries?.length) {
+      setEntries(stored.entries);
+      setDraftRestored(true);
+      setDraftSavedAt(stored.savedAt || null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      const savedAt = new Date().toISOString();
+      saveDraft(DRAFT_KEY, { entries, savedAt });
+      setDraftSavedAt(savedAt);
+    }, 400);
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [entries]);
 
   const updateEntry = (index: number, field: string, value: string) => {
     setEntries((prev) =>
-      prev.map((entry, i) => (i === index ? { ...entry, [field]: value } : entry))
+      prev.map((entry, i) => {
+        if (i !== index) return entry;
+        const next: any = { ...entry, [field]: value };
+        if (field === "call_time") {
+          next.call_time_manual = true;
+        }
+        if (field === "date" && !entry.call_time_manual) {
+          next.call_time = getCallTimeFromDateTimeLocal(value);
+        }
+        return next;
+      })
     );
   };
 
@@ -44,6 +83,7 @@ export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceForm
         date: "",
         location: "",
         call_time: "",
+        call_time_manual: false,
         timezone: DEFAULT_TIMEZONE,
         rehearsals: [],
       },
@@ -116,10 +156,14 @@ export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceForm
           date: "",
           location: "",
           call_time: "",
+          call_time_manual: false,
           timezone: DEFAULT_TIMEZONE,
           rehearsals: [],
         },
       ]);
+      clearDraft(DRAFT_KEY);
+      setDraftRestored(false);
+      setDraftSavedAt(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     }
@@ -135,6 +179,12 @@ export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceForm
               📌 Make sure to configure your .env.local file with Supabase credentials. See QUICK_START.md for instructions.
             </p>
           )}
+        </div>
+      )}
+
+      {draftRestored && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-2 rounded text-sm">
+          Draft restored from this browser. {draftSavedAt ? `Last saved ${new Date(draftSavedAt).toLocaleString()}.` : ""}
         </div>
       )}
 
@@ -188,22 +238,24 @@ export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceForm
                 onChange={(e) => updateEntry(index, "call_time", e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <div className="text-xs text-gray-500 mt-1">
+                Auto-fills 1 hour before performance unless edited.
+              </div>
             </div>
             <div>
               <label className="block text-gray-700 font-semibold mb-2">
                 Location *
               </label>
-              <input
-                type="text"
+              <LocationAutocompleteInput
                 value={entry.location}
-                onChange={(e) => updateEntry(index, "location", e.target.value)}
+                onChange={(value) => updateEntry(index, "location", value)}
                 placeholder="e.g., Main Auditorium"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
           <div className="text-xs text-gray-500">
-            Timezone: {entry.timezone}
+            Timezone: {entry.timezone} (times are saved in Eastern Time)
           </div>
 
           <div>

@@ -34,6 +34,7 @@ interface RehearseOverlayProps {
   parts: PartItem[];
   musicUrl?: string | null;
   onClose: () => void;
+  onUpdatePartTimepoints?: (updatedPart: PartItem) => void;
 }
 
 const GRID_COLS = 12;
@@ -48,7 +49,7 @@ function getInitials(name: string) {
   return (chunks[0][0] + chunks[chunks.length - 1][0]).toUpperCase();
 }
 
-export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: RehearseOverlayProps) {
+export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpdatePartTimepoints }: RehearseOverlayProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [positionsByPart, setPositionsByPart] = useState<Record<string, PositionEntry[]>>({});
   const [loadingPositions, setLoadingPositions] = useState(false);
@@ -64,18 +65,39 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: Reh
   const [stageOrientation, setStageOrientation] = useState<FrontDirection>("bottom");
   const [flashSubpartId, setFlashSubpartId] = useState<string | null>(null);
   const [currentSubpartId, setCurrentSubpartId] = useState<string | null>(null);
+  const [editingPartId, setEditingPartId] = useState<string | null>(null);
+  const [editStartMin, setEditStartMin] = useState<string>("");
+  const [editStartSec, setEditStartSec] = useState<string>("");
+  const [editEndMin, setEditEndMin] = useState<string>("");
+  const [editEndSec, setEditEndSec] = useState<string>("");
+  const [savingPartId, setSavingPartId] = useState<string | null>(null);
+  const [partTimeOverrides, setPartTimeOverrides] = useState<
+    Record<string, { start: number | null; end: number | null }>
+  >({});
   const audioRef = useRef<HTMLAudioElement>(null);
   const prevTimeToNextRef = useRef<number | null>(null);
   const lastFlashRef = useRef<string | null>(null);
 
+  const effectiveParts = useMemo(() => {
+    return parts.map((part) => {
+      const override = partTimeOverrides[part.id];
+      if (!override) return part;
+      return {
+        ...part,
+        timepoint_seconds: override.start,
+        timepoint_end_seconds: override.end,
+      };
+    });
+  }, [parts, partTimeOverrides]);
+
   const orderedParts = useMemo(() => {
-    return [...parts].sort((a, b) => {
+    return [...effectiveParts].sort((a, b) => {
       const aTime = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
       const bTime = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
       if (aTime === bTime) return (a.order || 0) - (b.order || 0);
       return aTime - bTime;
     });
-  }, [parts]);
+  }, [effectiveParts]);
 
   const timepointParts = useMemo(() => {
     return orderedParts.filter((p) => typeof p.timepoint_seconds === "number");
@@ -108,6 +130,20 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: Reh
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const splitTime = (value: number | null | undefined) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return { min: "", sec: "" };
+    const total = Math.max(0, Math.floor(value));
+    return { min: String(Math.floor(total / 60)), sec: String(total % 60) };
+  };
+
+  const composeSeconds = (minStr: string, secStr: string) => {
+    if (!minStr && !secStr) return null;
+    const mins = minStr ? parseInt(minStr, 10) : 0;
+    const secs = secStr ? parseFloat(secStr) : 0;
+    if (Number.isNaN(mins) || Number.isNaN(secs)) return null;
+    return mins * 60 + secs;
+  };
+
   const allPeople = useMemo(() => {
     const names = new Set<string>();
     Object.values(positionsByPart).forEach((list) => {
@@ -128,6 +164,20 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: Reh
       return subparts.some((sub) => (subpartAssignments[sub.id] || []).includes(personFilter));
     });
   }, [orderedParts, personFilter, positionsByPart, subpartsByPart, subpartAssignments]);
+
+  const startEditPartTime = (part: PartItem) => {
+    const currentStart =
+      typeof part.timepoint_seconds === "number" ? part.timepoint_seconds : null;
+    const currentEnd =
+      typeof part.timepoint_end_seconds === "number" ? part.timepoint_end_seconds : null;
+    const startSplit = splitTime(currentStart);
+    const endSplit = splitTime(currentEnd);
+    setEditStartMin(startSplit.min);
+    setEditStartSec(startSplit.sec);
+    setEditEndMin(endSplit.min);
+    setEditEndSec(endSplit.sec);
+    setEditingPartId(part.id);
+  };
 
   const playRing = () => {
     try {
@@ -576,6 +626,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: Reh
                 {filteredParts.map((part, idx) => {
                   const isCurrent = currentPart?.id === part.id;
                   const isNext = nextPart?.id === part.id;
+                  const isEditing = editingPartId === part.id;
                   return (
                     <div
                       key={part.id}
@@ -594,6 +645,117 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose }: Reh
                       <div className="text-base text-gray-500">
                         {typeof part.timepoint_seconds === "number" ? formatTime(part.timepoint_seconds) : "No timepoint"}
                       </div>
+                      {isEditing ? (
+                        <div className="mt-2 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <div className="text-[11px] font-semibold text-gray-600">Start (m / s)</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={editStartMin}
+                                  onChange={(e) => setEditStartMin(e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  value={editStartSec}
+                                  onChange={(e) => setEditStartSec(e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[11px] font-semibold text-gray-600">End (m / s)</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={editEndMin}
+                                  onChange={(e) => setEditEndMin(e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  value={editEndSec}
+                                  onChange={(e) => setEditEndSec(e.target.value)}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const start = composeSeconds(editStartMin, editStartSec);
+                                const end = composeSeconds(editEndMin, editEndSec);
+                                setSavingPartId(part.id);
+                                try {
+                                  const res = await fetch(`/api/parts/${part.id}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      timepoint_seconds: start,
+                                      timepoint_end_seconds: end,
+                                    }),
+                                  });
+                                  if (!res.ok) {
+                                    const data = await res.json().catch(() => null);
+                                    throw new Error(data?.details || data?.error || "Failed to update timepoints");
+                                  }
+                                  const updated = await res.json();
+                                  setPartTimeOverrides((prev) => ({
+                                    ...prev,
+                                    [part.id]: { start, end },
+                                  }));
+                                  onUpdatePartTimepoints?.(updated);
+                                  setEditingPartId(null);
+                                } catch (err) {
+                                  console.error("Failed to update timepoints:", err);
+                                  alert("Failed to update timepoints");
+                                } finally {
+                                  setSavingPartId(null);
+                                }
+                              }}
+                              className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 disabled:opacity-50"
+                              disabled={savingPartId === part.id}
+                            >
+                              {savingPartId === part.id ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingPartId(null);
+                              }}
+                              className="px-2 py-1 bg-gray-300 text-gray-800 rounded text-xs hover:bg-gray-400"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditPartTime(part);
+                            }}
+                            className="text-[11px] text-indigo-600 hover:text-indigo-800 underline"
+                          >
+                            Edit start/end
+                          </button>
+                        </div>
+                      )}
                       {isNext && timeToNext !== null && timeToNext <= 10 && (
                         <div className="text-4xl font-extrabold text-red-600 animate-pulse">
                           {Math.ceil(timeToNext)}

@@ -9,7 +9,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, description, order, timepoint_seconds, timepoint_end_seconds, is_group } = body;
+    const { name, description, order, timepoint_seconds, timepoint_end_seconds, is_group, timeline_row } = body;
 
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
@@ -18,6 +18,7 @@ export async function PUT(
     if (is_group !== undefined) updateData.is_group = is_group;
     if (timepoint_seconds !== undefined) updateData.timepoint_seconds = parseFloat(timepoint_seconds);
     if (timepoint_end_seconds !== undefined) updateData.timepoint_end_seconds = timepoint_end_seconds ? parseFloat(timepoint_end_seconds) : null;
+    if (timeline_row !== undefined) updateData.timeline_row = timeline_row === null || timeline_row === "" ? null : parseInt(timeline_row, 10);
 
     console.log("Updating part with data:", { id, updateData });
 

@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
 
     const { data: sourceParts, error: sourceError } = await supabase
       .from("parts")
-      .select("id,name,description,order,is_group,timepoint_seconds,timepoint_end_seconds")
+      .select("id,name,description,order,is_group,timepoint_seconds,timepoint_end_seconds,timeline_row")
       .eq("performance_id", source_performance_id)
       .order("order", { ascending: true });
 
@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
       is_group: part.is_group ?? true,
       timepoint_seconds: copy_timepoints ? part.timepoint_seconds : null,
       timepoint_end_seconds: copy_timepoints ? part.timepoint_end_seconds : null,
+      timeline_row: copy_timepoints ? part.timeline_row : null,
     }));
 
     const { data: inserted, error: insertError } = await supabase

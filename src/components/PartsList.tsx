@@ -1,7 +1,7 @@
 "use client";
 
 import { Part, Subpart } from "@/types";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 interface PartsListProps {
   parts: Part[];
@@ -13,6 +13,7 @@ interface PartsListProps {
   variant?: "manage" | "select";
   enableDrag?: boolean;
   showPositionedNames?: boolean;
+  compact?: boolean;
 }
 
 export function PartsList({
@@ -25,6 +26,7 @@ export function PartsList({
   variant = "manage",
   enableDrag = true,
   showPositionedNames = true,
+  compact = false,
 }: PartsListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -53,6 +55,22 @@ export function PartsList({
   const [editSubpartTimepointEndSec, setEditSubpartTimepointEndSec] = useState<string>("");
   const [draggingSubpartId, setDraggingSubpartId] = useState<string | null>(null);
   const [draggingSubpartPartId, setDraggingSubpartPartId] = useState<string | null>(null);
+
+  const displayParts = useMemo(() => {
+    const items = [...parts];
+    return items.sort((a, b) => {
+      const aHas = typeof (a as any).timepoint_seconds === "number";
+      const bHas = typeof (b as any).timepoint_seconds === "number";
+      if (aHas && bHas) {
+        const aTime = (a as any).timepoint_seconds as number;
+        const bTime = (b as any).timepoint_seconds as number;
+        if (aTime !== bTime) return aTime - bTime;
+        return (a.order || 0) - (b.order || 0);
+      }
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      return (a.order || 0) - (b.order || 0);
+    });
+  }, [parts]);
 
   const splitTime = (value: any) => {
     if (value === null || value === undefined || value === "") return { min: "", sec: "" };
@@ -276,8 +294,8 @@ export function PartsList({
   };
 
   const handleReorder = async (fromIndex: number, toIndex: number) => {
-    if (toIndex < 0 || toIndex >= parts.length) return;
-    const newParts = [...parts];
+    if (toIndex < 0 || toIndex >= displayParts.length) return;
+    const newParts = [...displayParts];
     const [moved] = newParts.splice(fromIndex, 1);
     newParts.splice(toIndex, 0, moved);
 
@@ -312,7 +330,10 @@ export function PartsList({
 
   return (
     <div className="space-y-3">
-      {parts.map((part, index) => (
+      {displayParts.map((part, index) => {
+        const isCompact = compact && editingId !== part.id;
+        const typeLabel = part.is_group === false ? "Subparts/Solos" : "Group";
+        return (
         <div
           key={part.id}
           draggable={enableDrag}
@@ -322,8 +343,8 @@ export function PartsList({
           }}
           onDrop={() => {
             if (!enableDrag || !draggingId || draggingId === part.id) return;
-            const fromIndex = parts.findIndex((p) => p.id === draggingId);
-            const toIndex = parts.findIndex((p) => p.id === part.id);
+            const fromIndex = displayParts.findIndex((p) => p.id === draggingId);
+            const toIndex = displayParts.findIndex((p) => p.id === part.id);
             handleReorder(fromIndex, toIndex);
             setDraggingId(null);
           }}
@@ -424,17 +445,15 @@ export function PartsList({
             </div>
           ) : (
             <>
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex-1">
-                  <h3 className="font-bold text-gray-900">{part.name}</h3>
-                  {part.description && (
+              <div className={`flex justify-between items-start ${isCompact ? "" : "mb-3"}`}>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-gray-900 truncate">{part.name}</h3>
+                  {!isCompact && part.description && (
                     <p className="text-sm text-gray-600 mt-1">{part.description}</p>
                   )}
-                  <p className="text-xs text-gray-500 mt-1">
-                    {part.is_group === false ? "Subparts/Solos" : "Group"}
-                  </p>
+                  <p className="text-xs text-gray-500 mt-1">{typeLabel}</p>
                 </div>
-                {variant === "manage" && (
+                {variant === "manage" && !isCompact && (
                   <div className="flex gap-2 ml-4">
                     <button
                       onClick={() => handleReorder(index, index - 1)}
@@ -446,7 +465,7 @@ export function PartsList({
                     </button>
                     <button
                       onClick={() => handleReorder(index, index + 1)}
-                      disabled={index === parts.length - 1}
+                      disabled={index === displayParts.length - 1}
                       className="px-2 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 text-sm"
                       title="Move down"
                     >
@@ -456,21 +475,45 @@ export function PartsList({
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                <div className="bg-blue-50 p-2 rounded">
-                  <span className="text-gray-600">Positioned:</span>
-                  <span className="font-bold text-blue-600 ml-2">
-                    {positionedCounts[part.id] ?? "-"}
+              {isCompact && (
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                    {typeLabel}
                   </span>
+                  <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                    Positioned: {positionedCounts[part.id] ?? "-"}
+                  </span>
+                  <span className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded">
+                    Order: {part.order}
+                  </span>
+                  {variant === "manage" && (
+                    <div className="flex gap-2 ml-auto">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(part);
+                        }}
+                        className="px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm("Delete this part?")) {
+                            onDelete(part.id);
+                          }
+                        }}
+                        className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="bg-purple-50 p-2 rounded">
-                  <span className="text-gray-600">Order:</span>
-                  <span className="font-bold text-purple-600 ml-2">{part.order}</span>
-                </div>
-              </div>
-
+              )}
               {/* Timepoint Info */}
-              {variant === "manage" && ((part as any).timepoint_seconds !== undefined || (part as any).timepoint_end_seconds !== undefined) && (
+              {!isCompact && variant === "manage" && ((part as any).timepoint_seconds !== undefined || (part as any).timepoint_end_seconds !== undefined) && (
                 <div className="bg-amber-50 p-2 rounded mb-3 text-sm">
                   <span className="text-gray-600">Music Timepoint:</span>
                   <span className="font-bold text-amber-700 ml-2">
@@ -481,14 +524,14 @@ export function PartsList({
                 </div>
               )}
 
-              {showPositionedNames && positionedNames[part.id]?.length > 0 && (
+              {!isCompact && showPositionedNames && positionedNames[part.id]?.length > 0 && (
                 <div className="bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 mb-3">
                   {positionedNames[part.id].join(", ")}
                 </div>
               )}
 
 
-              {subpartsMap[part.id]?.length > 0 && (
+              {!isCompact && subpartsMap[part.id]?.length > 0 && (
                 <div className="bg-white border border-gray-200 rounded p-2 text-xs text-gray-700 mb-3">
                   <div className="font-semibold text-gray-600 mb-1">Subparts / Solos</div>
                   <div className="space-y-1">
@@ -652,6 +695,7 @@ export function PartsList({
                 </div>
               )}
 
+              {!isCompact && (
               <div className="bg-gray-50 border border-gray-200 rounded p-2 text-xs text-gray-700 mb-3">
                 <div className="font-semibold text-gray-600 mb-1">Add Subpart</div>
                 <input
@@ -734,8 +778,9 @@ export function PartsList({
                   Add
                 </button>
               </div>
+              )}
 
-              {variant === "manage" && (
+              {!isCompact && variant === "manage" && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleEdit(part)}
@@ -764,7 +809,25 @@ export function PartsList({
             </>
           )}
         </div>
-      ))}
+      );
+    })}
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

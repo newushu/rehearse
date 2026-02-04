@@ -1,23 +1,20 @@
 import { supabase } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
-// GET rehearsals for a performance
+// GET rehearsals for a performance (or all rehearsals if no performanceId)
 export async function GET(request: NextRequest) {
   try {
     const performanceId = request.nextUrl.searchParams.get("performanceId");
 
-    if (!performanceId) {
-      return NextResponse.json(
-        { error: "performanceId query parameter is required" },
-        { status: 400 }
-      );
-    }
-
-    const { data, error } = await supabase
+    let query = supabase
       .from("rehearsals")
       .select("*")
-      .eq("performance_id", performanceId)
-      .order("date", { ascending: true });
+      .order("date", { ascending: true })
+      .order("time", { ascending: true });
+    if (performanceId) {
+      query = query.eq("performance_id", performanceId);
+    }
+    const { data, error } = await query;
 
     if (error) throw error;
 

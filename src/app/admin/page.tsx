@@ -7,9 +7,12 @@ import { PerformanceForm } from "@/components/PerformanceForm";
 import { PerformancesList } from "@/components/PerformancesList";
 import { LogoUpload } from "@/components/LogoUpload";
 import { AppBrand } from "@/components/AppBrand";
+import { ScheduleView } from "@/components/ScheduleView";
+import { AdminSignOutButton } from "@/components/AdminSignOutButton";
+import { zonedDateTimeLocalToUtcIso } from "@/lib/datetime";
 
 export default function AdminDashboard() {
-  const [activeSection, setActiveSection] = useState<"performances">("performances");
+  const [activeSection, setActiveSection] = useState<"performances" | "schedule" | "branding">("performances");
   const [showForm, setShowForm] = useState(false);
   const { performances, loading, createPerformance, deletePerformance } = usePerformances();
 
@@ -26,7 +29,7 @@ export default function AdminDashboard() {
       const created = await createPerformance(
         entry.title,
         entry.description,
-        entry.date ? new Date(entry.date).toISOString() : entry.date,
+        entry.date ? zonedDateTimeLocalToUtcIso(entry.date, entry.timezone || "America/New_York") : entry.date,
         entry.location,
         entry.call_time,
         entry.timezone || "America/New_York"
@@ -63,6 +66,7 @@ export default function AdminDashboard() {
               Home
             </Link>
             <span className="px-3 py-2 bg-blue-800 rounded">Admin Panel</span>
+            <AdminSignOutButton className="px-3 py-2 bg-blue-700 rounded hover:bg-blue-600 text-sm" />
           </div>
         </div>
       </nav>
@@ -78,10 +82,6 @@ export default function AdminDashboard() {
           </p>
         </div>
 
-        <div className="mb-8">
-          <LogoUpload />
-        </div>
-
         {/* Menu Tabs */}
         <div className="flex gap-4 mb-8 flex-wrap">
           <button
@@ -93,6 +93,26 @@ export default function AdminDashboard() {
             }`}
           >
             Performances
+          </button>
+          <button
+            onClick={() => setActiveSection("schedule")}
+            className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+              activeSection === "schedule"
+                ? "bg-blue-600 text-white"
+                : "bg-white text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            Schedule
+          </button>
+          <button
+            onClick={() => setActiveSection("branding")}
+            className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+              activeSection === "branding"
+                ? "bg-blue-600 text-white"
+                : "bg-white text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            Branding
           </button>
         </div>
 
@@ -107,6 +127,17 @@ export default function AdminDashboard() {
               onCreatePerformance={handleCreatePerformance}
               onDeletePerformance={deletePerformance}
             />
+          )}
+          {activeSection === "schedule" && (
+            <ScheduleView title="Studio Schedule" accent="blue" />
+          )}
+          {activeSection === "branding" && (
+            <div className="space-y-4">
+              <h2 className="text-2xl font-bold text-gray-900">Branding</h2>
+              <div className="max-w-md">
+                <LogoUpload />
+              </div>
+            </div>
           )}
         </div>
       </div>

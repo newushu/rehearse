@@ -5,9 +5,11 @@ import { useState, useEffect, useCallback } from "react";
 import { usePerformances } from "@/hooks/usePerformances";
 import { StudentPositioningView } from "@/components/StudentPositioningView";
 import { AppBrand } from "@/components/AppBrand";
+import { ScheduleView } from "@/components/ScheduleView";
+import { formatDisplayDateTime } from "@/lib/datetime";
 
 export default function StudentSignup() {
-  const [activeTab, setActiveTab] = useState<"browse" | "mySignups">(
+  const [activeTab, setActiveTab] = useState<"browse" | "mySignups" | "schedule">(
     "browse"
   );
   const [selectedPerformanceId, setSelectedPerformanceId] = useState<string | null>(null);
@@ -63,6 +65,16 @@ export default function StudentSignup() {
           >
             My Sign-ups
           </button>
+          <button
+            onClick={() => setActiveTab("schedule")}
+            className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+              activeTab === "schedule"
+                ? "bg-green-600 text-white"
+                : "bg-white text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            Schedule
+          </button>
         </div>
 
         {/* Content */}
@@ -80,6 +92,7 @@ export default function StudentSignup() {
             />
           )}
           {activeTab === "mySignups" && <MySignups />}
+          {activeTab === "schedule" && <ScheduleView title="Performance Schedule" accent="green" />}
         </div>
       </div>
     </div>
@@ -228,7 +241,7 @@ function BrowsePerformances({
             >
               <h3 className="font-semibold text-gray-900">{perf.title}</h3>
               <div className="text-sm text-gray-600 mt-2">
-                <div>📅 {new Date(perf.date).toLocaleDateString()}</div>
+                <div>📅 {formatDisplayDateTime(perf.date, perf.timezone || "America/New_York")}</div>
                 <div>📍 {perf.location}</div>
               </div>
             </button>
@@ -525,7 +538,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             </h3>
             <div className="text-sm text-gray-600 mt-2">
               <div>📅 Date: {signup.performance?.date
-                ? new Date(signup.performance.date).toLocaleDateString()
+                ? formatDisplayDateTime(signup.performance.date, signup.performance.timezone || "America/New_York")
                 : "N/A"}</div>
               <div>📍 Location: {signup.performance?.location || "N/A"}</div>
               <div>
@@ -581,3 +594,5 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     </div>
   );
 }
+
+

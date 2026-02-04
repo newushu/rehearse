@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useCallback } from "react";
 import { AppLogo } from "@/components/AppLogo";
@@ -161,38 +161,65 @@ export function PositioningPanel({
     setPartNotesDraft(partDescription || "");
   }, [partDescription]);
 
-  useEffect(() => {
-    const loadSources = async () => {
-      try {
-        const res = await fetch(`/api/parts?performanceId=${performanceId}`);
-        if (!res.ok) return;
-        const partsData = await res.json();
-        const partOptions = (partsData || []).map((p: any) => ({
-          key: `part:${p.id}`,
-          label: `Part: ${p.name}`,
-        }));
+  const loadSources = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/parts?performanceId=${performanceId}`);
+      if (!res.ok) return;
+      const partsData = await res.json();
+      const partOptions = (partsData || []).map((p: any) => ({
+        key: `part:${p.id}`,
+        label: `Part: ${p.name}`,
+      }));
 
-        const subpartsEntries = await Promise.all(
-          (partsData || []).map(async (p: any) => {
-            const subRes = await fetch(`/api/subparts?partId=${p.id}`);
-            if (!subRes.ok) return [];
-            const subData = await subRes.json();
-            return (subData || []).map((s: any) => ({
-              key: `subpart:${s.id}`,
-              label: `Subpart: ${p.name} • ${s.title}`,
-            }));
-          })
-        );
+      const subpartsEntries = await Promise.all(
+        (partsData || []).map(async (p: any) => {
+          const subRes = await fetch(`/api/subparts?partId=${p.id}`);
+          if (!subRes.ok) return [];
+          const subData = await subRes.json();
+          return (subData || []).map((s: any) => ({
+            key: `subpart:${s.id}`,
+            label: `Subpart: ${p.name} - ${s.title}`,
+          }));
+        })
+      );
 
-        const subpartOptions = subpartsEntries.flat();
-        setSourceOptions([...partOptions, ...subpartOptions]);
-      } catch (err) {
-        console.error("Error loading position sources:", err);
-      }
-    };
-
-    loadSources();
+      const subpartOptions = subpartsEntries.flat();
+      setSourceOptions([...partOptions, ...subpartOptions]);
+    } catch (err) {
+      console.error("Error loading position sources:", err);
+    }
   }, [performanceId]);
+
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
+
+  const refreshSubpartsAndSources = useCallback(async () => {
+    await fetchSubparts();
+    await loadSources();
+  }, [fetchSubparts, loadSources]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      refreshSubpartsAndSources();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshSubpartsAndSources();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshSubpartsAndSources]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      refreshSubpartsAndSources();
+    }, 3000);
+    return () => window.clearInterval(intervalId);
+  }, [refreshSubpartsAndSources]);
 
   useEffect(() => {
     if (!selectedSubpartId) return;
@@ -863,28 +890,32 @@ export function PositioningPanel({
                   Front of stage: {frontDirection === "bottom" ? "Bottom" : "Top"}
                 </p>
               </div>
-              {subparts.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-600">Subpart</span>
-                  <select
-                    value={selectedSubpartId || ""}
-                    onChange={(e) => setSelectedSubpartId(e.target.value)}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs"
-                  >
-                    <option value="">Part positions</option>
-                    {subparts.map((sub) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.title}
-                      </option>
-                    ))}
-                  </select>
-                  {activeSubpart?.description && (
-                    <span className="text-[10px] text-gray-500">
-                      {activeSubpart.description}
-                    </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-600">Subpart</span>
+                <select
+                  value={selectedSubpartId || ""}
+                  onChange={(e) => setSelectedSubpartId(e.target.value)}
+                  className="px-2 py-1 border border-gray-300 rounded text-xs"
+                  disabled={subparts.length === 0}
+                >
+                  <option value="">Part positions</option>
+                  {subparts.length === 0 && (
+                    <option value="" disabled>
+                      No subparts yet
+                    </option>
                   )}
-                </div>
-              )}
+                  {subparts.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.title}
+                    </option>
+                  ))}
+                </select>
+                {activeSubpart?.description && (
+                  <span className="text-[10px] text-gray-500">
+                    {activeSubpart.description}
+                  </span>
+                )}
+              </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="flex items-center gap-3 text-xs">
                   {saving && (
