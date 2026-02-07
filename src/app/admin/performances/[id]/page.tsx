@@ -407,6 +407,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                     onCreatePart={createPart}
                     onDeletePart={deletePart}
                     onReorderParts={setParts}
+                    musicUrl={musicUrl}
                   />
                 )}
                 {activeTab === "music" && (
@@ -935,6 +936,7 @@ interface PartsTabContentProps {
   onCreatePart: (name: string, description: string, order: number, isGroup: boolean) => Promise<void>;
   onDeletePart: (id: string) => Promise<void>;
   onReorderParts: (parts: any[]) => void;
+  musicUrl?: string | null;
 }
 
 function PartsTabContent({
@@ -946,6 +948,7 @@ function PartsTabContent({
   onCreatePart,
   onDeletePart,
   onReorderParts,
+  musicUrl = null,
 }: PartsTabContentProps) {
   const [copyFromId, setCopyFromId] = useState<string>("");
   const [copyTimepoints, setCopyTimepoints] = useState(true);
@@ -1073,6 +1076,7 @@ function PartsTabContent({
           onDelete={onDeletePart}
           onReorder={onReorderParts}
           compact={compactParts}
+          musicUrl={musicUrl}
         />
       )}
     </div>

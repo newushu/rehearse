@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_TIMEZONE, formatDisplayDateTime } from "@/lib/datetime";
 
-type UniformType = { id: string; name: string };
+type UniformType = { id: string; name: string; color?: string | null };
 type UniformAssignment = {
   id: string;
   student_id: string | null;
@@ -72,6 +72,10 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
     return map;
   }, [items]);
 
+  const sortedRoster = useMemo(() => {
+    return [...roster].sort((a, b) => a.name.localeCompare(b.name));
+  }, [roster]);
+
   const itemById = useMemo(() => {
     const map: Record<string, UniformItem> = {};
     items.forEach((item) => {
@@ -118,8 +122,29 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
     return list[0] || null;
   };
 
-  const handleAssign = async (signupId: string, itemId: string | null) => {
-    const res = await fetch(`/api/signups/${signupId}`, {
+  const handleAssign = async (row: RosterEntry, itemId: string | null) => {
+    if (!itemId) {
+      const assignedItem = row.assigned_uniform_item_id
+        ? itemById[row.assigned_uniform_item_id] || null
+        : null;
+      if (assignedItem) {
+        const existing = (assignedItem.uniform_assignments || []).find(
+          (assignment) =>
+            assignment.performance_id === performanceId &&
+            assignment.student_id === row.student_id &&
+            !assignment.returned_at
+        );
+        if (existing?.distributed_at) {
+          alert("Cannot clear an assignment that is already distributed.");
+          return;
+        }
+        if (existing?.id) {
+          await fetch(`/api/uniform-assignments/${existing.id}`, { method: "DELETE" });
+        }
+      }
+    }
+
+    const res = await fetch(`/api/signups/${row.signup_id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assigned_uniform_item_id: itemId }),
@@ -129,10 +154,35 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
       return;
     }
     setRoster((prev) =>
-      prev.map((row) =>
-        row.signup_id === signupId ? { ...row, assigned_uniform_item_id: itemId } : row
+      prev.map((entry) =>
+        entry.signup_id === row.signup_id
+          ? { ...entry, assigned_uniform_item_id: itemId }
+          : entry
       )
     );
+
+    if (itemId) {
+      const item = itemById[itemId];
+      const existing = (item?.uniform_assignments || []).find(
+        (assignment) =>
+          assignment.performance_id === performanceId &&
+          assignment.student_id === row.student_id &&
+          !assignment.returned_at
+      );
+      if (!existing) {
+        await fetch("/api/uniform-assignments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uniform_item_id: itemId,
+            student_id: row.student_id,
+            student_name: row.name,
+            performance_id: performanceId,
+            distributed_at: null,
+          }),
+        });
+      }
+    }
   };
 
   const handleGive = async (row: RosterEntry, item: UniformItem) => {
@@ -223,6 +273,7 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                       : `Assigned to ${active.student_name || "Unknown"}`
                     : "On hand";
                   const isDistributed = Boolean(active && active.distributed_at);
+                  const typeColor = type.color || "#0f172a";
                   return (
                     <span
                       key={item.id}
@@ -231,11 +282,10 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                         e.dataTransfer.setData("uniformItemId", item.id);
                       }}
                       title={status}
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        isDistributed
-                          ? "bg-slate-800 text-white cursor-grab ring-2 ring-amber-400"
-                          : "bg-slate-900 text-white cursor-grab"
+                      className={`px-3 py-1 rounded-full text-xs font-semibold text-white cursor-grab ${
+                        isDistributed ? "bg-black ring-2 ring-yellow-400" : ""
                       }`}
+                      style={isDistributed ? undefined : { backgroundColor: typeColor }}
                     >
                       {type.name} #{item.item_number}
                       {isDistributed && (
@@ -263,10 +313,11 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
           <div className="px-3 py-2">Given</div>
           <div className="px-3 py-2">Returned</div>
         </div>
-        {roster.length === 0 && (
+        {sortedRoster.length === 0 && (
           <div className="p-4 text-sm text-gray-500">No roster yet.</div>
         )}
-        {roster.map((row) => {
+        <div className="max-h-[420px] overflow-y-auto">
+          {sortedRoster.map((row) => {
           const assignedItem = row.assigned_uniform_item_id
             ? itemById[row.assigned_uniform_item_id] || null
             : null;
@@ -286,11 +337,9 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
             ? "bg-gray-100 text-gray-600 border-gray-200"
             : isMismatch
               ? "bg-red-100 text-red-700 border-red-300"
-              : isReturned
-                ? "bg-blue-100 text-blue-700 border-blue-300"
-                : isGiven
-                  ? "bg-gray-700 text-white border-gray-700"
-                  : "bg-amber-100 text-amber-700 border-amber-300";
+              : isGiven
+                ? "bg-black text-white border-yellow-400 ring-2 ring-yellow-400"
+                : "text-white border-transparent";
           const statusLabel = !assignedItem
             ? "Unassigned"
             : isReturned
@@ -339,19 +388,27 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                       return;
                     }
                   }
-                  handleAssign(row.signup_id, itemId);
+                  handleAssign(row, itemId);
                 }}
               >
                 {assignedItem ? (
                   <div className="flex items-center gap-2">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${chipColor}`}>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold border ${chipColor}`}
+                      style={{
+                        backgroundColor:
+                          assignedItem && !isGiven
+                            ? typeById[assignedItem.uniform_type_id]?.color || undefined
+                            : undefined,
+                      }}
+                    >
                       {typeById[assignedItem.uniform_type_id]?.name || "Uniform"} #{assignedItem.item_number}
                     </span>
                     {isMismatch && (
                       <span className="text-[10px] font-semibold text-red-600">Not available</span>
                     )}
                     <button
-                      onClick={() => handleAssign(row.signup_id, null)}
+                      onClick={() => handleAssign(row, null)}
                       className="text-[10px] text-gray-500 hover:text-gray-700"
                     >
                       Clear
@@ -399,6 +456,7 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );

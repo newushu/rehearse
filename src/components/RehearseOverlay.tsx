@@ -686,14 +686,18 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     const gridScale = isNext ? nextGridScale : currentGridScale;
     const gridWrapRef = isNext ? nextGridWrapRef : currentGridWrapRef;
     const subparts = part ? subpartsByPart[part.id] || [] : [];
+    const orderedSubparts = subparts
+      .filter((s) => typeof s.timepoint_seconds === "number")
+      .sort((a, b) => (a.timepoint_seconds || 0) - (b.timepoint_seconds || 0));
     const currentSub = part && currentSubpartId
       ? subparts.find((s) => s.id === currentSubpartId)
       : null;
-    const nextSub = isNext
-      ? subparts
-          .filter((s) => typeof s.timepoint_seconds === "number")
-          .sort((a, b) => (a.timepoint_seconds || 0) - (b.timepoint_seconds || 0))[0]
-      : null;
+    const nextSub = isNext ? orderedSubparts[0] || null : null;
+    const currentSubIndex = currentSub
+      ? orderedSubparts.findIndex((s) => s.id === currentSub.id)
+      : -1;
+    const nextSubForCurrent =
+      currentSubIndex >= 0 ? orderedSubparts[currentSubIndex + 1] || null : orderedSubparts[0] || null;
     const truncate7 = (value: string) => value.slice(0, 7);
     return (
       <div className={`rounded-lg border p-4 shadow-sm ${frameClass}`}>
@@ -790,6 +794,11 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
         {isNext && nextSub && (
           <div className="mt-2 text-2xl font-extrabold text-purple-700">
             {truncate7(nextSub.title || "")}
+          </div>
+        )}
+        {!isNext && nextSubForCurrent && (
+          <div className="mt-2 text-xl font-extrabold text-blue-700">
+            Next up: {truncate7(nextSubForCurrent.title || "")}
           </div>
         )}
       </div>

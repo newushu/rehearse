@@ -24,8 +24,24 @@ export async function POST(request: NextRequest) {
       .is("returned_at", null)
       .limit(1);
     if (activeError) throw activeError;
-    if (active && active.length > 0) {
-      return NextResponse.json({ error: "Uniform is already assigned" }, { status: 409 });
+    if (performance_id) {
+      const { data: activeForPerf, error: perfError } = await supabase
+        .from("uniform_assignments")
+        .select("id, student_id")
+        .eq("uniform_item_id", uniform_item_id)
+        .eq("performance_id", performance_id)
+        .is("returned_at", null);
+      if (perfError) throw perfError;
+      if (activeForPerf && activeForPerf.length > 0) {
+        const sameStudent = activeForPerf.find((row: any) => row.student_id === student_id);
+        if (sameStudent) {
+          return NextResponse.json({ existing: true, id: sameStudent.id }, { status: 200 });
+        }
+        return NextResponse.json(
+          { error: "Uniform already assigned for this performance" },
+          { status: 409 }
+        );
+      }
     }
 
     const { data, error } = await supabase
@@ -42,6 +58,19 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
     if (error) throw error;
+
+    if (performance_id && student_id) {
+      try {
+        await supabase
+          .from("student_signups")
+          .update({ assigned_uniform_item_id: uniform_item_id })
+          .eq("performance_id", performance_id)
+          .eq("student_id", student_id);
+      } catch (syncErr) {
+        console.error("Failed to sync uniform assignment to signup:", syncErr);
+      }
+    }
+
     return NextResponse.json(data, { status: 201 });
   } catch (error) {
     console.error("Error creating uniform assignment:", error);

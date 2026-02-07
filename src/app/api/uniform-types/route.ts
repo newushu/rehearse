@@ -17,13 +17,13 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, code } = await request.json();
+    const { name, code, color } = await request.json();
     if (!name) {
       return NextResponse.json({ error: "Missing required field: name" }, { status: 400 });
     }
     const { data, error } = await supabase
       .from("uniform_types")
-      .insert([{ name, code: code || null }])
+      .insert([{ name, code: code || null, color: color || null }])
       .select()
       .single();
     if (error) throw error;

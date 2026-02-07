@@ -15,6 +15,7 @@ interface PartsListProps {
   showPositionedNames?: boolean;
   compact?: boolean;
   showDelete?: boolean;
+  musicUrl?: string | null;
 }
 
 export function PartsList({
@@ -29,6 +30,7 @@ export function PartsList({
   showPositionedNames = true,
   compact = false,
   showDelete = false,
+  musicUrl = null,
 }: PartsListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -109,6 +111,19 @@ export function PartsList({
     const mins = Math.floor(total / 60);
     const secs = total % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const orderSubpartsByTime = (list: Subpart[]) => {
+    return [...list].sort((a, b) => {
+      const aStart = typeof (a as any).timepoint_seconds === "number"
+        ? (a as any).timepoint_seconds
+        : Number.POSITIVE_INFINITY;
+      const bStart = typeof (b as any).timepoint_seconds === "number"
+        ? (b as any).timepoint_seconds
+        : Number.POSITIVE_INFINITY;
+      if (aStart !== bStart) return aStart - bStart;
+      return (a.title || "").localeCompare(b.title || "");
+    });
   };
 
   // Fetch positioned count for each part on mount
@@ -533,6 +548,23 @@ export function PartsList({
                       Duration: {formatDuration((part as any).timepoint_seconds, (part as any).timepoint_end_seconds)}
                     </span>
                   )}
+                  {musicUrl &&
+                    ((part as any).timepoint_seconds !== undefined ||
+                      (part as any).timepoint_end_seconds !== undefined) && (
+                    <audio
+                      controls
+                      preload="metadata"
+                      className="h-8"
+                      onPlay={(e) => {
+                        const start = Number((part as any).timepoint_seconds || 0);
+                        if (Number.isFinite(start)) {
+                          e.currentTarget.currentTime = start;
+                        }
+                      }}
+                    >
+                      <source src={musicUrl} />
+                    </audio>
+                  )}
                   {variant === "manage" && (
                     <div className="flex gap-2 ml-auto">
                       <button
@@ -561,7 +593,7 @@ export function PartsList({
               )}
               {isCompact && subpartsMap[part.id]?.length > 0 && (
                 <div className="mt-2 text-xs text-gray-600">
-                  Subparts: {subpartsMap[part.id].map((sub) => sub.title).join(", ")}
+                  Subparts: {orderSubpartsByTime(subpartsMap[part.id]).map((sub) => sub.title).join(", ")}
                 </div>
               )}
               {/* Timepoint Info */}

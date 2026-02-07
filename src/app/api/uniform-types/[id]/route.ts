@@ -7,7 +7,7 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const { name, code } = await request.json();
+    const { name, code, color } = await request.json();
     if (!name) {
       return NextResponse.json({ error: "Missing name" }, { status: 400 });
     }
@@ -21,7 +21,7 @@ export async function PUT(
     const prevCode = currentType?.code || null;
     const { data, error } = await supabase
       .from("uniform_types")
-      .update({ name, code: nextCode })
+      .update({ name, code: nextCode, color: color || null })
       .eq("id", id)
       .select()
       .single();

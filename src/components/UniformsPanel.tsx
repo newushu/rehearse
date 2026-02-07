@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_TIMEZONE, formatDisplayDateTime } from "@/lib/datetime";
 
-type UniformType = { id: string; name: string; code?: string | null };
+type UniformType = { id: string; name: string; code?: string | null; color?: string | null };
 type UniformAssignment = {
   id: string;
   student_id: string | null;
@@ -30,6 +30,7 @@ export function UniformsPanel() {
   const [loading, setLoading] = useState(true);
   const [newTypeName, setNewTypeName] = useState("");
   const [newTypeCode, setNewTypeCode] = useState("");
+  const [newTypeColor, setNewTypeColor] = useState("#6b7280");
   const [newItemByType, setNewItemByType] = useState<Record<string, string>>({});
   const [newItemSizeByType, setNewItemSizeByType] = useState<Record<string, string>>({});
   const [newItemSeqByType, setNewItemSeqByType] = useState<Record<string, string>>({});
@@ -42,6 +43,7 @@ export function UniformsPanel() {
   const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
   const [editTypeName, setEditTypeName] = useState("");
   const [editTypeCode, setEditTypeCode] = useState("");
+  const [editTypeColor, setEditTypeColor] = useState("#6b7280");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editItemNumber, setEditItemNumber] = useState("");
   const [editItemSize, setEditItemSize] = useState("");
@@ -213,6 +215,13 @@ export function UniformsPanel() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <input
+          type="color"
+          value={newTypeColor}
+          onChange={(e) => setNewTypeColor(e.target.value)}
+          className="h-10 w-12 rounded border border-gray-300"
+          title="Uniform color"
+        />
+        <input
           value={newTypeCode}
           onChange={(e) => setNewTypeCode(e.target.value)}
           placeholder="Code (e.g., A)"
@@ -232,11 +241,12 @@ export function UniformsPanel() {
             const res = await fetch("/api/uniform-types", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name, code }),
+              body: JSON.stringify({ name, code, color: newTypeColor }),
             });
             if (res.ok) {
               setNewTypeName("");
               setNewTypeCode("");
+              setNewTypeColor("#6b7280");
               await loadData();
             } else {
               alert("Failed to create uniform type");
@@ -258,6 +268,13 @@ export function UniformsPanel() {
             {editingTypeId === type.id ? (
               <div className="flex flex-wrap items-center gap-2">
                 <input
+                  type="color"
+                  value={editTypeColor}
+                  onChange={(e) => setEditTypeColor(e.target.value)}
+                  className="h-9 w-10 rounded border border-gray-300"
+                  title="Uniform color"
+                />
+                <input
                   value={editTypeCode}
                   onChange={(e) => setEditTypeCode(e.target.value)}
                   className="px-3 py-2 border border-gray-300 rounded text-sm w-24"
@@ -275,7 +292,7 @@ export function UniformsPanel() {
                     const res = await fetch(`/api/uniform-types/${type.id}`, {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ name: nextName, code: nextCode }),
+                      body: JSON.stringify({ name: nextName, code: nextCode, color: editTypeColor }),
                     });
                     if (res.ok) {
                       setEditingTypeId(null);
@@ -298,6 +315,12 @@ export function UniformsPanel() {
             ) : (
               <div className="flex items-center gap-3">
                 <h3 className="text-lg font-semibold text-gray-900">{type.name}</h3>
+                {type.color && (
+                  <span
+                    className="h-3 w-3 rounded-full border border-gray-300"
+                    style={{ backgroundColor: type.color }}
+                  />
+                )}
                 {type.code && (
                   <span className="text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-700">
                     Code: {type.code}
@@ -308,6 +331,7 @@ export function UniformsPanel() {
                     setEditingTypeId(type.id);
                     setEditTypeName(type.name);
                     setEditTypeCode(type.code || "");
+                    setEditTypeColor(type.color || "#6b7280");
                   }}
                   className="text-xs text-blue-600 hover:text-blue-800"
                 >
@@ -445,9 +469,14 @@ export function UniformsPanel() {
                         <button
                           type="button"
                           onClick={() => setSelectedItem(item)}
-                          className="text-left font-semibold text-gray-900"
+                          className="text-left"
                         >
-                          #{item.item_number}
+                          <span
+                            className="px-2 py-1 rounded-full text-xs font-semibold text-white"
+                            style={{ backgroundColor: type.color || "#374151" }}
+                          >
+                            #{item.item_number}
+                          </span>
                         </button>
                         <button
                           onClick={() => {

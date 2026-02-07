@@ -721,6 +721,15 @@ export function PositioningPanel({
   };
 
   const activeSubpart = subparts.find((s) => s.id === selectedSubpartId);
+  const orderedSubparts = useMemo(() => {
+    const list = [...subparts];
+    return list.sort((a, b) => {
+      const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
+      const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
+      if (aStart !== bStart) return aStart - bStart;
+      return (a.title || "").localeCompare(b.title || "");
+    });
+  }, [subparts]);
   const subpartDuration = activeSubpart
     ? formatDuration(activeSubpart.timepoint_seconds as any, activeSubpart.timepoint_end_seconds as any)
     : "";
@@ -1181,7 +1190,7 @@ export function PositioningPanel({
                       No subparts yet
                     </option>
                   )}
-                  {subparts.map((sub) => (
+                  {orderedSubparts.map((sub) => (
                     <option key={sub.id} value={sub.id}>
                       {sub.title}
                     </option>
@@ -1239,7 +1248,7 @@ export function PositioningPanel({
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
                 <div className="text-xs font-semibold text-gray-700 mb-2">Subparts</div>
                 <div className="flex flex-wrap gap-2">
-                  {subparts.map((sub, idx) => (
+                  {orderedSubparts.map((sub, idx) => (
                     <button
                       key={sub.id}
                       draggable
@@ -1327,13 +1336,13 @@ export function PositioningPanel({
 
             {/* Grid */}
             <div className="flex items-center justify-center gap-3">
-              {subparts.length > 0 && canPosition && (
+              {orderedSubparts.length > 0 && canPosition && (
                 <button
                   onClick={() => {
-                    const idx = subparts.findIndex((s) => s.id === selectedSubpartId);
-                    if (idx > 0) setSelectedSubpartId(subparts[idx - 1].id);
+                    const idx = orderedSubparts.findIndex((s) => s.id === selectedSubpartId);
+                    if (idx > 0) setSelectedSubpartId(orderedSubparts[idx - 1].id);
                   }}
-                  disabled={!selectedSubpartId || subparts.findIndex((s) => s.id === selectedSubpartId) === 0}
+                  disabled={!selectedSubpartId || orderedSubparts.findIndex((s) => s.id === selectedSubpartId) === 0}
                   className="px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 text-xs"
                 >
                   Prev
@@ -1442,13 +1451,13 @@ export function PositioningPanel({
                   })}
                 </div>
               </div>
-              {subparts.length > 0 && canPosition && (
+              {orderedSubparts.length > 0 && canPosition && (
                 <button
                   onClick={() => {
-                    const idx = subparts.findIndex((s) => s.id === selectedSubpartId);
-                    if (idx >= 0 && idx < subparts.length - 1) setSelectedSubpartId(subparts[idx + 1].id);
+                    const idx = orderedSubparts.findIndex((s) => s.id === selectedSubpartId);
+                    if (idx >= 0 && idx < orderedSubparts.length - 1) setSelectedSubpartId(orderedSubparts[idx + 1].id);
                   }}
-                  disabled={!selectedSubpartId || subparts.findIndex((s) => s.id === selectedSubpartId) === subparts.length - 1}
+                  disabled={!selectedSubpartId || orderedSubparts.findIndex((s) => s.id === selectedSubpartId) === orderedSubparts.length - 1}
                   className="px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 text-xs"
                 >
                   Next
