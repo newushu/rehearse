@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePerformances } from "@/hooks/usePerformances";
 import { StudentPositioningView } from "@/components/StudentPositioningView";
 import { AppBrand } from "@/components/AppBrand";
@@ -570,6 +570,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
   const [assignedSubpartLabel, setAssignedSubpartLabel] = useState<string | null>(null);
   const [assignedPartNote, setAssignedPartNote] = useState<string | null>(null);
   const [assignedSubpartNote, setAssignedSubpartNote] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const musicUrl = signup.performance?.music_file_path
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/performance-music/${signup.performance.music_file_path}`
     : "";
@@ -592,6 +593,17 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     if (!startLabel && !endLabel) return null;
     if (startLabel && endLabel) return `${startLabel} - ${endLabel}`;
     return startLabel || endLabel;
+  };
+
+  const parseTimeStart = (value: string | null | undefined) => {
+    if (!value) return null;
+    const trimmed = value.split("-")[0].trim();
+    const parts = trimmed.split(":");
+    if (parts.length < 2) return null;
+    const mins = Number(parts[0]);
+    const secs = Number(parts[1]);
+    if (!Number.isFinite(mins) || !Number.isFinite(secs)) return null;
+    return mins * 60 + secs;
   };
 
   const fetchPositioning = useCallback(async () => {
@@ -679,6 +691,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
               return {
                 title: sub.title || "Subpart",
                 time: formatTimeRange(sub.timepoint_seconds, sub.timepoint_end_seconds),
+                start: typeof sub.timepoint_seconds === "number" ? sub.timepoint_seconds : null,
               };
             }
           }
@@ -698,7 +711,24 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
           (p: any) => p.student_id === signup.student_id
         );
         const partTime = formatTimeRange(part.timepoint_seconds, part.timepoint_end_seconds);
+        const subRes = await fetch(`/api/subparts?partId=${part.id}`);
+        const subpartsList = await subRes.json();
+        const orderedSubparts = Array.isArray(subpartsList)
+          ? subpartsList
+              .slice()
+              .sort((a: any, b: any) => {
+                const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
+                const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
+                if (aStart !== bStart) return aStart - bStart;
+                return (a.title || "").localeCompare(b.title || "");
+              })
+          : [];
+        const subpartsListLabel = orderedSubparts.length > 0
+          ? orderedSubparts.map((sub: any, index: number) => `${index + 1}) ${sub.title}`).join(", ")
+          : null;
         const subpartInfo = await resolveSubpartTimeForStudent(part.id);
+        const partStart =
+          typeof part.timepoint_seconds === "number" ? part.timepoint_seconds : null;
 
         if (isPositioned) {
           const pos = positions.find((p: any) => p.student_id === signup.student_id);
@@ -710,6 +740,9 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             part_time: partTime,
             subpart_time: subpartInfo?.time ?? null,
             subpart_title: subpartInfo?.title ?? null,
+            part_start: partStart,
+            subpart_start: subpartInfo?.start ?? null,
+            subparts_list: subpartsListLabel,
           });
         } else {
           posData.push({
@@ -718,6 +751,9 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             part_time: partTime,
             subpart_time: subpartInfo?.time ?? null,
             subpart_title: subpartInfo?.title ?? null,
+            part_start: partStart,
+            subpart_start: subpartInfo?.start ?? null,
+            subparts_list: subpartsListLabel,
           });
         }
       }
@@ -835,7 +871,9 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                 {positioning.map((pos, idx) => (
                   <div key={idx} className="text-sm text-gray-600 p-2 bg-gray-50 rounded">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-gray-900">{pos.part_name}:</span>
+                      <span className="font-medium text-gray-900">
+                        {idx + 1}. {pos.part_name}
+                      </span>
                       {pos.part_time && (
                         <span className="text-xs font-semibold text-gray-700">
                           Time: {pos.part_time}
@@ -847,6 +885,44 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                         </span>
                       )}
                     </div>{" "}
+                    {pos.subparts_list && (
+                      <div className="mt-1 text-[10px] text-gray-600">
+                        Subparts: {pos.subparts_list}
+                      </div>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      {musicUrl && pos.part_time && pos.part_start !== null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!audioRef.current) return;
+                            audioRef.current.currentTime = pos.part_start;
+                            audioRef.current.play();
+                          }}
+                          className="px-2 py-1 rounded bg-gray-800 text-white"
+                        >
+                          Play Part
+                        </button>
+                      )}
+                      {musicUrl && pos.subpart_time && pos.subpart_start !== null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!audioRef.current) return;
+                            audioRef.current.currentTime = pos.subpart_start;
+                            audioRef.current.play();
+                          }}
+                          className="px-2 py-1 rounded bg-blue-600 text-white"
+                        >
+                          Play Subpart
+                        </button>
+                      )}
+                      {pos.subpart_time && (
+                        <span className="text-[10px] text-gray-500">
+                          Play Part = full part timestamp • Play Subpart = your assigned subpart
+                        </span>
+                      )}
+                    </div>
                     {pos.positioned ? (
                       <span className="text-green-700 font-semibold">
                         ✓ Grid position ({pos.x}, {pos.y})
@@ -882,7 +958,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
           <div className="mt-6 border-t border-gray-200 pt-4">
             <h4 className="font-semibold text-gray-700 mb-2">Music</h4>
             {musicUrl ? (
-              <audio controls className="w-full">
+              <audio ref={audioRef} controls className="w-full">
                 <source src={musicUrl} />
               </audio>
             ) : (

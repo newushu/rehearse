@@ -405,12 +405,18 @@ export function UniformsPanel() {
               <div>Assign</div>
             </div>
             {(itemsByType[type.id] || []).map((item) => {
-              const active = getActiveAssignment(item);
-              const statusLabel = active
-                ? active.distributed_at
-                  ? "Distributed"
-                  : "Assigned"
-                : "On hand";
+              const activeAssignments = (item.uniform_assignments || []).filter(
+                (assignment) => !assignment.returned_at
+              );
+              const active = activeAssignments[0] || null;
+              const statusLabel =
+                activeAssignments.length > 1
+                  ? "Multiple assignments"
+                  : active
+                    ? active.distributed_at
+                      ? "Distributed"
+                      : "Assigned"
+                    : "On hand";
               const assignmentCount = getAssignmentCount(item);
               const activeCount = getActiveCount(item);
               const suggestionList = assigningItemId === item.id
@@ -521,13 +527,25 @@ export function UniformsPanel() {
                     >
                       {statusLabel}
                     </span>
-                    {active && (
+                    {activeAssignments.length > 0 && (
                       <div className="text-xs text-gray-600 mt-1">
-                        {active.student_name || "Unknown"}
-                        {active.distributed_at && (
-                          <div className="text-[10px] text-gray-500">
-                            Given {formatDisplayDateTime(active.distributed_at, DEFAULT_TIMEZONE)}
-                          </div>
+                        {activeAssignments.length > 1 ? (
+                          <div className="text-[10px] text-gray-500">Multiple assignments</div>
+                        ) : (
+                          <>
+                            <div>{active?.student_name || "Unknown"}</div>
+                            {active?.performance_id && (
+                              <div className="text-[10px] text-gray-500">
+                                Performance:{" "}
+                                {performanceNameById[active.performance_id] || active.performance_id}
+                              </div>
+                            )}
+                            {active?.distributed_at && (
+                              <div className="text-[10px] text-gray-500">
+                                Given {formatDisplayDateTime(active.distributed_at, DEFAULT_TIMEZONE)}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
@@ -593,17 +611,17 @@ export function UniformsPanel() {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={async () => {
-                            const res = await fetch("/api/uniform-assignments", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                uniform_item_id: item.id,
-                                student_id: assignStudentId || null,
-                                student_name: assignStudentName || null,
-                                performance_id: assignPerformanceId || null,
-                                distributed_at: null,
-                              }),
-                            });
+                              const res = await fetch("/api/uniform-assignments", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  uniform_item_id: item.id,
+                                  student_id: assignStudentId || null,
+                                  student_name: assignStudentName || null,
+                                  performance_id: assignPerformanceId || null,
+                                  distributed_at: null,
+                                }),
+                              });
                               if (res.ok) {
                                 if (assignPerformanceId && assignStudentId) {
                                   try {
@@ -630,7 +648,8 @@ export function UniformsPanel() {
                                 await loadData();
                                 resetAssignForm();
                               } else {
-                                alert("Failed to assign uniform");
+                                const data = await res.json().catch(() => ({}));
+                                alert(data?.error || "Failed to assign uniform");
                               }
                             }}
                             className="px-3 py-1 text-xs rounded bg-emerald-600 text-white"

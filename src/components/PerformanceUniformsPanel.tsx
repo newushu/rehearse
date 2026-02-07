@@ -34,6 +34,8 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
   const [items, setItems] = useState<UniformItem[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [assignCodeByRow, setAssignCodeByRow] = useState<Record<string, string>>({});
+  const [historyStudent, setHistoryStudent] = useState<RosterEntry | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -122,6 +124,40 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
     return list[0] || null;
   };
 
+  const getActiveAssignments = (item?: UniformItem | null) => {
+    if (!item) return [];
+    return (item.uniform_assignments || []).filter((assignment) => !assignment.returned_at);
+  };
+
+  const getItemStatusLabel = (item?: UniformItem | null) => {
+    const activeList = getActiveAssignments(item);
+    if (activeList.length === 0) return "On hand";
+    if (activeList.length > 1) return "Assigned in multiple performances";
+    const active = activeList[0];
+    if (active.distributed_at) {
+      return `Distributed to ${active.student_name || "Unknown"}${active.performance_id && active.performance_id !== performanceId ? " (other performance)" : ""}`;
+    }
+    return `Assigned to ${active.student_name || "Unknown"}${active.performance_id && active.performance_id !== performanceId ? " (other performance)" : ""}`;
+  };
+
+  const getHistoryByItemForStudent = (studentId: string) => {
+    const map = new Map<string, UniformAssignment[]>();
+    items.forEach((item) => {
+      const assignments = (item.uniform_assignments || []).filter(
+        (assignment) => assignment.student_id === studentId
+      );
+      if (assignments.length > 0) {
+        assignments.sort((a, b) => {
+          const aTime = new Date(a.distributed_at || a.returned_at || 0).getTime();
+          const bTime = new Date(b.distributed_at || b.returned_at || 0).getTime();
+          return bTime - aTime;
+        });
+        map.set(item.id, assignments);
+      }
+    });
+    return map;
+  };
+
   const handleAssign = async (row: RosterEntry, itemId: string | null) => {
     if (!itemId) {
       const assignedItem = row.assigned_uniform_item_id
@@ -141,6 +177,20 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
         if (existing?.id) {
           await fetch(`/api/uniform-assignments/${existing.id}`, { method: "DELETE" });
         }
+      }
+    }
+
+    if (itemId) {
+      const item = itemById[itemId];
+      const existing = (item?.uniform_assignments || []).find(
+        (assignment) =>
+          assignment.performance_id === performanceId &&
+          !assignment.returned_at &&
+          assignment.student_id !== row.student_id
+      );
+      if (existing) {
+        alert("Uniform already assigned for this performance.");
+        return;
       }
     }
 
@@ -170,7 +220,7 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
           !assignment.returned_at
       );
       if (!existing) {
-        await fetch("/api/uniform-assignments", {
+        const assignRes = await fetch("/api/uniform-assignments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -181,6 +231,10 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
             distributed_at: null,
           }),
         });
+        if (!assignRes.ok) {
+          const data = await assignRes.json().catch(() => ({}));
+          if (data?.error) alert(data.error);
+        }
       }
     }
   };
@@ -369,7 +423,16 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
               key={row.signup_id}
               className="grid grid-cols-5 gap-0 border-b border-gray-200 last:border-b-0 text-sm"
             >
-              <div className="px-3 py-3 font-semibold text-gray-900">{row.name}</div>
+              <div className="px-3 py-3 font-semibold text-gray-900 flex items-center gap-2">
+                <span>{row.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setHistoryStudent(row)}
+                  className="text-[10px] px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+                >
+                  History
+                </button>
+              </div>
               <div
                 className="px-3 py-3"
                 onDragOver={(e) => e.preventDefault()}
@@ -415,8 +478,58 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                     </button>
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-500 border border-dashed border-gray-300 rounded px-2 py-1 w-fit">
-                    Drop uniform here
+                  <div className="w-full">
+                    <input
+                      value={assignCodeByRow[row.signup_id] || ""}
+                      onChange={(e) =>
+                        setAssignCodeByRow((prev) => ({
+                          ...prev,
+                          [row.signup_id]: e.target.value,
+                        }))
+                      }
+                      list={`uniform-options-${row.signup_id}`}
+                      placeholder="Drop uniform here or type code"
+                      className="w-full px-2 py-1 border border-dashed border-gray-300 rounded text-xs text-gray-700"
+                    />
+                    <datalist id={`uniform-options-${row.signup_id}`}>
+                      {items.map((item) => (
+                        <option key={item.id} value={item.item_number} />
+                      ))}
+                    </datalist>
+                    <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-600">
+                      {items
+                        .filter((item) =>
+                          (assignCodeByRow[row.signup_id] || "").trim()
+                            ? item.item_number.toLowerCase().includes((assignCodeByRow[row.signup_id] || "").trim().toLowerCase())
+                            : false
+                        )
+                        .slice(0, 3)
+                        .map((item) => (
+                          <span key={`${row.signup_id}-${item.id}`} className="px-2 py-1 bg-gray-100 rounded-full">
+                            {item.item_number} ({getItemStatusLabel(item)})
+                          </span>
+                        ))}
+                    </div>
+                    <div className="mt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const value = (assignCodeByRow[row.signup_id] || "").trim();
+                          if (!value) return;
+                          const match = items.find(
+                            (item) => item.item_number.toLowerCase() === value.toLowerCase()
+                          );
+                          if (!match) {
+                            alert("Uniform not found.");
+                            return;
+                          }
+                          handleAssign(row, match.id);
+                        }}
+                        className="px-2 py-1 text-xs rounded bg-gray-800 text-white"
+                      >
+                        Assign
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -458,6 +571,75 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
         })}
         </div>
       </div>
+
+      {historyStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 w-full max-w-2xl shadow-lg">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-500">Uniform History</div>
+                <div className="text-lg font-semibold text-gray-900">{historyStudent.name}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryStudent(null)}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 max-h-[70vh] overflow-y-auto space-y-3 text-sm text-gray-700">
+              {Array.from(getHistoryByItemForStudent(historyStudent.student_id).entries()).map(
+                ([itemId, assignments]) => {
+                  const item = itemById[itemId];
+                  return (
+                    <div key={itemId} className="border border-gray-200 rounded p-3">
+                      <div className="font-semibold text-gray-900">
+                        {item ? `#${item.item_number}` : "Uniform Item"}
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {assignments.map((assignment) => (
+                          <div key={assignment.id} className="text-xs text-gray-600">
+                            {assignment.performance_id && (
+                              <div>
+                                Performance: {assignment.performance_id === performanceId ? "This performance" : assignment.performance_id}
+                              </div>
+                            )}
+                            <div>
+                              Assigned:{" "}
+                              {assignment.distributed_at || assignment.returned_at
+                                ? formatDisplayDateTime(
+                                    assignment.distributed_at || assignment.returned_at || "",
+                                    DEFAULT_TIMEZONE
+                                  )
+                                : "—"}
+                            </div>
+                            <div>
+                              Distributed:{" "}
+                              {assignment.distributed_at
+                                ? formatDisplayDateTime(assignment.distributed_at, DEFAULT_TIMEZONE)
+                                : "—"}
+                            </div>
+                            <div>
+                              Returned:{" "}
+                              {assignment.returned_at
+                                ? formatDisplayDateTime(assignment.returned_at, DEFAULT_TIMEZONE)
+                                : "—"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+              {getHistoryByItemForStudent(historyStudent.student_id).size === 0 && (
+                <div className="text-sm text-gray-500">No uniform history for this student.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
