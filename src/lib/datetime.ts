@@ -6,6 +6,34 @@ export interface DateTimeLocalParts {
   minute: number;
 }
 
+export const DEFAULT_TIMEZONE = "America/New_York";
+
+const hasTimeZoneInfo = (value: string) => /[zZ]|[+-]\d{2}:\d{2}$/.test(value);
+
+const parseNaiveDateTime = (value: string) => {
+  if (!value) return null;
+  const [datePart, timePartRaw] = value.split(/[T ]/);
+  if (!datePart || !timePartRaw) return null;
+  const timePart = timePartRaw.slice(0, 5);
+  const [yearStr, monthStr, dayStr] = datePart.split("-");
+  const [hourStr, minuteStr] = timePart.split(":");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return null;
+  }
+  return { datePart, timePart, year, month, day, hour, minute };
+};
+
 export function parseDateTimeLocal(value: string): DateTimeLocalParts | null {
   if (!value) return null;
   const [datePart, timePart] = value.split("T");
@@ -71,6 +99,10 @@ export function zonedDateTimeLocalToUtcIso(localValue: string, timeZone: string)
 
 export function formatDateTimeLocalInTimeZone(isoValue: string, timeZone: string): string {
   if (!isoValue) return "";
+  if (!hasTimeZoneInfo(isoValue)) {
+    const parsed = parseNaiveDateTime(isoValue);
+    return parsed ? `${parsed.datePart}T${parsed.timePart}` : isoValue;
+  }
   const date = new Date(isoValue);
   if (Number.isNaN(date.getTime())) return "";
   const dtf = new Intl.DateTimeFormat("en-US", {
@@ -94,20 +126,36 @@ export function formatDateTimeLocalInTimeZone(isoValue: string, timeZone: string
 
 export function formatDisplayDateTime(isoValue: string, timeZone: string): string {
   if (!isoValue) return "—";
+  if (!hasTimeZoneInfo(isoValue)) {
+    const parsed = parseNaiveDateTime(isoValue);
+    if (!parsed) return isoValue;
+    const dateUtc = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day, parsed.hour, parsed.minute, 0));
+    const dateLabel = dateUtc.toLocaleDateString(undefined, { timeZone: "UTC" });
+    const timeLabel = dateUtc.toLocaleTimeString(undefined, {
+      timeZone: "UTC",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${dateLabel}, ${timeLabel} ET`;
+  }
   const date = new Date(isoValue);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleString(undefined, {
-    timeZone,
+    timeZone: timeZone || DEFAULT_TIMEZONE,
     timeZoneName: "short",
   });
 }
 
 export function formatTimeInTimeZone(isoValue: string, timeZone: string): string {
   if (!isoValue) return "—";
+  if (!hasTimeZoneInfo(isoValue)) {
+    const parsed = parseNaiveDateTime(isoValue);
+    return parsed ? formatTimeString(parsed.timePart) : isoValue;
+  }
   const date = new Date(isoValue);
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleTimeString(undefined, {
-    timeZone,
+    timeZone: timeZone || DEFAULT_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
   });
@@ -115,10 +163,14 @@ export function formatTimeInTimeZone(isoValue: string, timeZone: string): string
 
 export function getDateKeyInTimeZone(isoValue: string, timeZone: string): string {
   if (!isoValue) return "";
+  if (!hasTimeZoneInfo(isoValue)) {
+    const parsed = parseNaiveDateTime(isoValue);
+    return parsed ? parsed.datePart : "";
+  }
   const date = new Date(isoValue);
   if (Number.isNaN(date.getTime())) return "";
   const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone,
+    timeZone: timeZone || DEFAULT_TIMEZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -140,7 +192,11 @@ export function formatTimeString(value: string): string {
   const minute = Number(minuteStr);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return value;
   const date = new Date(Date.UTC(2000, 0, 1, hour, minute, 0));
-  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
 }
 
 export function getCallTimeFromDateTimeLocal(value: string): string {
@@ -163,3 +219,9 @@ export function isCallTimeLocked(localValue: string, timeZone: string): boolean 
   const lockAt = perfDate.getTime() - 60 * 60 * 1000;
   return Date.now() >= lockAt;
 }
+
+
+
+
+
+

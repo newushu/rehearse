@@ -78,7 +78,7 @@ export function MusicUpload({
                 {loading ? "Uploading..." : "Click to upload music"}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                MP3, WAV, OGG (max 50MB)
+                MP3, WAV, OGG (max 15MB)
               </p>
             </div>
           </div>

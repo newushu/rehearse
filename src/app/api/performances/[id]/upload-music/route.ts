@@ -27,11 +27,11 @@ export async function POST(
       );
     }
 
-    // Validate file size (max 50MB)
-    const maxSize = 50 * 1024 * 1024;
+    // Validate file size (max 15MB)
+    const maxSize = 15 * 1024 * 1024;
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: "File size exceeds 50MB limit" },
+        { error: "File size exceeds 15MB limit" },
         { status: 400 }
       );
     }
@@ -89,3 +89,5 @@ export async function POST(
     );
   }
 }
+
+

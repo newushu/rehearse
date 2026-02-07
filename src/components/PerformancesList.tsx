@@ -1,6 +1,7 @@
 "use client";
 
 import { Performance } from "@/types";
+import { DEFAULT_TIMEZONE } from "@/lib/datetime";
 import Link from "next/link";
 
 interface PerformancesListProps {
@@ -18,7 +19,7 @@ export function PerformancesList({
     if (!value) return "--";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "--";
-    return date.toLocaleString(undefined, { timeZone: timeZone || "America/New_York", timeZoneName: "short" });
+    return date.toLocaleString(undefined, { timeZone: DEFAULT_TIMEZONE, timeZoneName: "short" });
   };
 
   if (performances.length === 0) {

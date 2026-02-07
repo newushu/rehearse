@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Rehearsal } from "@/types";
+import { DEFAULT_TIMEZONE, formatTimeString } from "@/lib/datetime";
 
 interface RehearsalsListProps {
   rehearsals: Rehearsal[];
@@ -29,10 +30,11 @@ export function RehearsalsList({ rehearsals, onDelete, onUpdate }: RehearsalsLis
     if (value) {
       const [y, m, d] = value.split("-").map(Number);
       if (y && m && d) {
-        return new Date(y, m - 1, d).toLocaleDateString();
+        const date = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+        return date.toLocaleDateString(undefined, { timeZone: DEFAULT_TIMEZONE });
       }
     }
-    return new Date(iso).toLocaleDateString();
+    return new Date(iso).toLocaleDateString(undefined, { timeZone: DEFAULT_TIMEZONE });
   };
 
   const startEdit = (rehearsal: Rehearsal) => {
@@ -95,7 +97,7 @@ export function RehearsalsList({ rehearsals, onDelete, onUpdate }: RehearsalsLis
                 <h3 className="font-semibold text-gray-900">{rehearsal.title}</h3>
                 <div className="grid grid-cols-2 text-sm text-gray-600 mt-1">
                   <span>📅 {toLocalDateLabel(rehearsal.date)}</span>
-                  <span>🕐 {rehearsal.time}</span>
+                  <span>🕐 {formatTimeString(rehearsal.time)} ET</span>
                 </div>
                 <div className="text-sm text-gray-600 mt-1">
                   📍 {rehearsal.location}

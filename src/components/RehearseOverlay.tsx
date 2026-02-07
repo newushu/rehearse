@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { MusicPlayer } from "@/components/MusicPlayer";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppLogo } from "@/components/AppLogo";
 
 interface PartItem {
@@ -39,7 +38,8 @@ interface RehearseOverlayProps {
 
 const GRID_COLS = 12;
 const GRID_ROWS = 8;
-const CELL_SIZE = 68;
+const CURRENT_CELL_SIZE = 34;
+const NEXT_CELL_SIZE = 80;
 type FrontDirection = "bottom" | "top";
 
 function getInitials(name: string) {
@@ -58,10 +58,14 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
   const [subpartAssignments, setSubpartAssignments] = useState<Record<string, string[]>>({});
   const [subpartHasPositions, setSubpartHasPositions] = useState<Record<string, boolean>>({});
   const [personFilter, setPersonFilter] = useState("");
+  const [notesByKey, setNotesByKey] = useState<Record<string, string>>({});
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [noteSaving, setNoteSaving] = useState<Record<string, boolean>>({});
   const [countdown, setCountdown] = useState<number | null>(null);
   const [countdownTargetTime, setCountdownTargetTime] = useState<number | null>(null);
   const [countdownTargetPartId, setCountdownTargetPartId] = useState<string | null>(null);
   const [callTime, setCallTime] = useState<string>("");
+  const [performanceTitle, setPerformanceTitle] = useState<string>("");
   const [stageOrientation, setStageOrientation] = useState<FrontDirection>("bottom");
   const [flashSubpartId, setFlashSubpartId] = useState<string | null>(null);
   const [currentSubpartId, setCurrentSubpartId] = useState<string | null>(null);
@@ -74,7 +78,22 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
   const [partTimeOverrides, setPartTimeOverrides] = useState<
     Record<string, { start: number | null; end: number | null }>
   >({});
+  const [expandedPartIds, setExpandedPartIds] = useState<Set<string>>(new Set());
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [loopEnabled, setLoopEnabled] = useState(false);
+  const [loopRange, setLoopRange] = useState<{ start: number; end: number } | null>(null);
+  const [pendingLoopRange, setPendingLoopRange] = useState<{ start: number; end: number } | null>(null);
+  const [loopSelectMode, setLoopSelectMode] = useState(false);
+  const [timeError, setTimeError] = useState<string | null>(null);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const currentGridWrapRef = useRef<HTMLDivElement>(null);
+  const nextGridWrapRef = useRef<HTMLDivElement>(null);
+  const [currentGridScale, setCurrentGridScale] = useState(1);
+  const [nextGridScale, setNextGridScale] = useState(1);
   const prevTimeToNextRef = useRef<number | null>(null);
   const lastFlashRef = useRef<string | null>(null);
 
@@ -103,6 +122,44 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     return orderedParts.filter((p) => typeof p.timepoint_seconds === "number");
   }, [orderedParts]);
 
+  const partSegments = useMemo(() => {
+    const segments: Array<{ id: string; name: string; start: number; end: number; subparts: SubpartItem[] }> = [];
+    const sorted = [...orderedParts].filter((p) => typeof p.timepoint_seconds === "number")
+      .sort((a, b) => (a.timepoint_seconds || 0) - (b.timepoint_seconds || 0));
+    for (let i = 0; i < sorted.length; i++) {
+      const part = sorted[i];
+      const start = part.timepoint_seconds || 0;
+      const nextStart = i < sorted.length - 1 ? sorted[i + 1].timepoint_seconds || start : null;
+      const end =
+        typeof part.timepoint_end_seconds === "number"
+          ? part.timepoint_end_seconds
+          : nextStart !== null
+            ? nextStart
+            : start + 1;
+      segments.push({
+        id: part.id,
+        name: part.name,
+        start,
+        end: Math.max(end, start + 0.1),
+        subparts: subpartsByPart[part.id] || [],
+      });
+    }
+    return segments;
+  }, [orderedParts, subpartsByPart]);
+
+  const partSegmentById = useMemo(() => {
+    const map = new Map<string, { start: number; end: number }>();
+    partSegments.forEach((seg) => {
+      map.set(seg.id, { start: seg.start, end: seg.end });
+    });
+    return map;
+  }, [partSegments]);
+
+  const timelineDuration = useMemo(() => {
+    const last = partSegments.reduce((max, seg) => Math.max(max, seg.end), 0);
+    return Math.max(duration || 0, last, 1);
+  }, [partSegments, duration]);
+
   const currentIndex = useMemo(() => {
     if (timepointParts.length === 0) return -1;
     let idx = 0;
@@ -130,6 +187,29 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const formatDuration = (start: number | null | undefined, end: number | null | undefined) => {
+    if (typeof start !== "number" || typeof end !== "number") return "";
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return "";
+    const total = Math.max(0, end - start);
+    const mins = Math.floor(total / 60);
+    const secs = Math.round(total % 60);
+    return `${mins}m ${secs}s`;
+  };
+
+  const getSubpartBounds = (partId: string) => {
+    const list = subpartsByPart[partId] || [];
+    const starts: number[] = [];
+    const ends: number[] = [];
+    list.forEach((sub) => {
+      if (typeof sub.timepoint_seconds === "number") starts.push(sub.timepoint_seconds);
+      if (typeof sub.timepoint_end_seconds === "number") ends.push(sub.timepoint_end_seconds);
+    });
+    return {
+      minStart: starts.length > 0 ? Math.min(...starts) : null,
+      maxEnd: ends.length > 0 ? Math.max(...ends) : null,
+    };
+  };
+
   const splitTime = (value: number | null | undefined) => {
     if (value === null || value === undefined || Number.isNaN(value)) return { min: "", sec: "" };
     const total = Math.max(0, Math.floor(value));
@@ -142,6 +222,30 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     const secs = secStr ? parseFloat(secStr) : 0;
     if (Number.isNaN(mins) || Number.isNaN(secs)) return null;
     return mins * 60 + secs;
+  };
+
+  const seekTo = (time: number, shouldPlay: boolean = true) => {
+    if (!audioRef.current) return;
+    const nextTime = Math.max(0, time);
+    audioRef.current.currentTime = nextTime;
+    setCurrentTime(nextTime);
+    if (shouldPlay) {
+      audioRef.current.play();
+    }
+  };
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+  };
+
+  const selectLoopForPart = (partId: string) => {
+    const seg = partSegmentById.get(partId);
+    if (seg) setPendingLoopRange(seg);
   };
 
   const allPeople = useMemo(() => {
@@ -177,6 +281,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     setEditEndMin(endSplit.min);
     setEditEndSec(endSplit.sec);
     setEditingPartId(part.id);
+    setTimeError(null);
   };
 
   const playRing = () => {
@@ -232,9 +337,9 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     if (!audioRef.current) return;
     setCountdownTargetTime(targetTime);
     setCountdownTargetPartId(partId);
-    setCountdown(5);
+    setCountdown(3);
     playBeep();
-    let tick = 5;
+    let tick = 3;
     const interval = setInterval(() => {
       tick -= 1;
       if (tick <= 0) {
@@ -250,6 +355,81 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
       playBeep();
     }, 1000);
   };
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+
+    const handleLoaded = () => {
+      setDuration(audio.duration || 0);
+    };
+
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("loadedmetadata", handleLoaded);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handlePause);
+
+    return () => {
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("loadedmetadata", handleLoaded);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handlePause);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    audioRef.current.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    const el = currentGridWrapRef.current;
+    if (!el) return;
+    const baseWidth = GRID_COLS * CURRENT_CELL_SIZE;
+    const updateScale = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      setCurrentGridScale(Math.min(1, width / baseWidth));
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = nextGridWrapRef.current;
+    if (!el) return;
+    const baseWidth = GRID_COLS * NEXT_CELL_SIZE;
+    const updateScale = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      setNextGridScale(Math.min(1, width / baseWidth));
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!loopEnabled || !loopRange || !audioRef.current) return;
+    if (currentTime >= loopRange.end) {
+      audioRef.current.currentTime = loopRange.start;
+      if (!audioRef.current.paused) {
+        audioRef.current.play();
+      }
+    }
+  }, [currentTime, loopEnabled, loopRange]);
 
   useEffect(() => {
     if (!ringEnabled) {
@@ -350,6 +530,36 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     fetchPositions();
   }, [parts, performanceId]);
 
+  const refreshSubpartsForPart = useCallback(async (partId: string) => {
+    try {
+      const res = await fetch(`/api/subparts?partId=${partId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const normalized = (data || []).map((item: any) => ({
+        id: item.id,
+        part_id: item.part_id,
+        title: item.title,
+        description: item.description ?? null,
+        timepoint_seconds: item.timepoint_seconds ?? null,
+        timepoint_end_seconds: item.timepoint_end_seconds ?? null,
+      }));
+      setSubpartsByPart((prev) => ({ ...prev, [partId]: normalized }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { partId?: string } | undefined;
+      if (detail?.partId) {
+        refreshSubpartsForPart(detail.partId);
+      }
+    };
+    window.addEventListener("subparts-updated", handleUpdated);
+    return () => window.removeEventListener("subparts-updated", handleUpdated);
+  }, [refreshSubpartsForPart]);
+
   useEffect(() => {
     const fetchPerformance = async () => {
       try {
@@ -357,6 +567,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
         if (!res.ok) return;
         const data = await res.json();
         setCallTime(data?.call_time || "");
+        setPerformanceTitle(data?.title || "");
         if (data?.stage_orientation) {
           setStageOrientation(data.stage_orientation === "top" ? "top" : "bottom");
         }
@@ -366,6 +577,67 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     };
     fetchPerformance();
   }, [performanceId]);
+
+  const getNoteKey = useCallback((partId: string, subpartId?: string | null) => {
+    return subpartId ? `subpart:${subpartId}` : `part:${partId}`;
+  }, []);
+
+  const saveNote = useCallback(
+    async (partId: string, subpartId?: string | null) => {
+      const key = getNoteKey(partId, subpartId);
+      const draft = (noteDrafts[key] ?? notesByKey[key] ?? "").trim();
+      const current = (notesByKey[key] ?? "").trim();
+      if (draft === current) return;
+      setNoteSaving((prev) => ({ ...prev, [key]: true }));
+      try {
+        const res = await fetch("/api/rehearse-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            performance_id: performanceId,
+            part_id: partId,
+            subpart_id: subpartId ?? null,
+            note: draft,
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to save note");
+        if (!draft) {
+          setNotesByKey((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        } else {
+          setNotesByKey((prev) => ({ ...prev, [key]: draft }));
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to save note");
+      } finally {
+        setNoteSaving((prev) => ({ ...prev, [key]: false }));
+      }
+    },
+    [getNoteKey, notesByKey, noteDrafts, performanceId]
+  );
+
+  useEffect(() => {
+    const fetchNotes = async () => {
+      try {
+        const res = await fetch(`/api/rehearse-notes?performanceId=${performanceId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const map: Record<string, string> = {};
+        (data || []).forEach((item: any) => {
+          const key = getNoteKey(item.part_id, item.subpart_id);
+          map[key] = item.note || "";
+        });
+        setNotesByKey(map);
+      } catch {
+        // ignore
+      }
+    };
+    fetchNotes();
+  }, [performanceId, getNoteKey]);
 
   const renderSubpartOverlay = (part: PartItem | null) => {
     if (!part) return null;
@@ -401,12 +673,28 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     );
   };
 
-  const renderGrid = (title: string, part: PartItem | null, isNext: boolean) => {
+  const renderGrid = (title: string, part: PartItem | null, isNext: boolean, cellSize: number) => {
     const positions = part ? positionsByPart[part.id] || [] : [];
     const titleSize = isNext ? "text-5xl" : "text-4xl";
     const labelSize = isNext ? "text-base" : "text-sm";
     const frameClass = isNext ? "border-purple-700 bg-purple-100" : "border-blue-700 bg-blue-100";
     const gridFill = isNext ? "from-purple-200 to-purple-300" : "from-blue-200 to-blue-300";
+    const markerSize = Math.max(18, Math.round(cellSize * 0.7));
+    const markerText = cellSize >= 70 ? "text-base" : "text-[10px]";
+    const baseWidth = GRID_COLS * cellSize;
+    const baseHeight = GRID_ROWS * cellSize;
+    const gridScale = isNext ? nextGridScale : currentGridScale;
+    const gridWrapRef = isNext ? nextGridWrapRef : currentGridWrapRef;
+    const subparts = part ? subpartsByPart[part.id] || [] : [];
+    const currentSub = part && currentSubpartId
+      ? subparts.find((s) => s.id === currentSubpartId)
+      : null;
+    const nextSub = isNext
+      ? subparts
+          .filter((s) => typeof s.timepoint_seconds === "number")
+          .sort((a, b) => (a.timepoint_seconds || 0) - (b.timepoint_seconds || 0))[0]
+      : null;
+    const truncate7 = (value: string) => value.slice(0, 7);
     return (
       <div className={`rounded-lg border p-4 shadow-sm ${frameClass}`}>
         <div className="flex items-center justify-between mb-3">
@@ -426,17 +714,24 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
           </div>
         )}
         <div
-          className={`border border-gray-300 bg-gradient-to-b ${gridFill} relative mx-auto`}
-          style={{
-            width: GRID_COLS * CELL_SIZE,
-            height: GRID_ROWS * CELL_SIZE,
-            backgroundImage: `
-              linear-gradient(rgba(0,0,0,.1) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(0,0,0,.1) 1px, transparent 1px)
-            `,
-            backgroundSize: `${CELL_SIZE}px ${CELL_SIZE}px`,
-          }}
+          ref={gridWrapRef}
+          className="w-full overflow-hidden"
+          style={{ height: baseHeight * gridScale }}
         >
+          <div
+            className={`border border-gray-300 bg-gradient-to-b ${gridFill} relative mx-auto`}
+            style={{
+              width: baseWidth,
+              height: baseHeight,
+              backgroundImage: `
+                linear-gradient(rgba(0,0,0,.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,0,0,.1) 1px, transparent 1px)
+              `,
+              backgroundSize: `${cellSize}px ${cellSize}px`,
+              transform: `scale(${gridScale})`,
+              transformOrigin: "top left",
+            }}
+          >
           {stageOrientation === "bottom" && (
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-500" />
           )}
@@ -452,16 +747,21 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
           >
             FRONT
           </div>
+          {!isNext && currentSub && (
+            <div className="absolute left-2 top-2 px-2 py-1 bg-white/80 text-amber-700 font-extrabold text-xl rounded shadow">
+              {truncate7(currentSub.title || "")}
+            </div>
+          )}
           {Array.from({ length: GRID_ROWS }).map((_, y) =>
             Array.from({ length: GRID_COLS }).map((_, x) => (
               <div
                 key={`${x}-${y}`}
                 className="absolute"
                 style={{
-                  left: x * CELL_SIZE,
-                  top: y * CELL_SIZE,
-                  width: CELL_SIZE,
-                  height: CELL_SIZE,
+                  left: x * cellSize,
+                  top: y * cellSize,
+                  width: cellSize,
+                  height: cellSize,
                 }}
               />
             ))
@@ -471,99 +771,346 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
               key={`${pos.student_id}-${pos.x}-${pos.y}`}
               className="absolute flex items-center justify-center"
               style={{
-                left: pos.x * CELL_SIZE,
-                top: pos.y * CELL_SIZE,
-                width: CELL_SIZE,
-                height: CELL_SIZE,
+                left: pos.x * cellSize,
+                top: pos.y * cellSize,
+                width: cellSize,
+                height: cellSize,
               }}
             >
-              <div className="w-14 h-14 bg-blue-600 text-white text-base font-bold rounded-full flex items-center justify-center shadow-md">
+              <div
+                className={`bg-blue-600 text-white ${markerText} font-bold rounded-full flex items-center justify-center shadow-md`}
+                style={{ width: markerSize, height: markerSize }}
+              >
                 {getInitials(pos.student_name)}
               </div>
             </div>
           ))}
+          </div>
+        </div>
+        {isNext && nextSub && (
+          <div className="mt-2 text-2xl font-extrabold text-purple-700">
+            {truncate7(nextSub.title || "")}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderNamesBox = (part: PartItem | null, isNext: boolean) => {
+    const positions = part ? positionsByPart[part.id] || [] : [];
+    const names = Array.from(
+      new Map(positions.map((p) => [p.student_id, p.student_name || "Unknown"])).values()
+    );
+    const subparts = part ? subpartsByPart[part.id] || [] : [];
+    const textSize = isNext ? "text-2xl" : "text-base";
+    const infoLabelSize = isNext ? "text-sm" : "text-xs";
+    const partDuration = part ? formatDuration(part.timepoint_seconds, part.timepoint_end_seconds) : "";
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm min-h-[72px]">
+        <div className={`${infoLabelSize} uppercase tracking-wide text-gray-500 mb-2`}>INFO</div>
+        <div className="space-y-3">
+          {partDuration && (
+            <div className="text-sm text-gray-600">
+              Duration: <span className="font-semibold text-gray-900">{partDuration}</span>
+            </div>
+          )}
+          <div>
+            <div className="text-xs font-semibold text-gray-600 mb-2">People</div>
+            {names.length === 0 ? (
+              <div className="text-xs text-gray-500">No positions</div>
+            ) : (
+              <div className={`flex flex-wrap gap-2 ${textSize} text-gray-800`}>
+                {names.map((name) => (
+                  <span key={`${part?.id || "none"}-${name}`} className="px-2 py-1 bg-gray-100 rounded">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          {subparts.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-600 mb-2">Subparts</div>
+              <div className="space-y-2 text-sm text-gray-700">
+                {subparts.map((sub, idx) => {
+                  const assigned = subpartAssignments[sub.id] || [];
+                  const subDuration = formatDuration(sub.timepoint_seconds, sub.timepoint_end_seconds);
+                  return (
+                    <div key={sub.id}>
+                      <div className="font-semibold text-gray-900">
+                        {idx + 1}. {sub.title}
+                      </div>
+                      {subDuration && (
+                        <div className="text-xs text-gray-500">Duration: {subDuration}</div>
+                      )}
+                      <div className="text-gray-600">
+                        {assigned.length === 0 ? (
+                          <span>Assigned: —</span>
+                        ) : (
+                          <span>
+                            Assigned:{" "}
+                            {assigned.map((name, aIdx) => (
+                              <span key={`${sub.id}-info-${aIdx}`}>
+                                {aIdx > 0 ? ", " : ""}
+                                {aIdx + 1}. {name}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
   };
 
-  const renderTimeline = (part: PartItem | null) => {
-    if (!part) return null;
-    const subparts = subpartsByPart[part.id] || [];
-    if (subparts.length === 0) return null;
-    const segments = subparts
-      .map((sub) => {
-        const rawStart = typeof sub.timepoint_seconds === "number" ? sub.timepoint_seconds : Number(sub.timepoint_seconds);
-        const rawEnd = typeof sub.timepoint_end_seconds === "number" ? sub.timepoint_end_seconds : Number(sub.timepoint_end_seconds);
-        const start = Number.isFinite(rawStart) ? rawStart : NaN;
-        const end = Number.isFinite(rawEnd) ? rawEnd : NaN;
-        if (!Number.isFinite(start)) return null;
-        return {
-          id: sub.id,
-          title: sub.title,
-          start,
-          end: Number.isFinite(end) ? end : start,
-        };
+  const getTimeFromPointer = (clientX: number) => {
+    const el = timelineRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return ratio * timelineDuration;
+  };
+
+  const handleTimelinePointerDown = (e: React.MouseEvent) => {
+    const time = getTimeFromPointer(e.clientX);
+    setIsScrubbing(true);
+    seekTo(time, false);
+  };
+
+  const handleTimelinePointerMove = (e: React.MouseEvent) => {
+    if (!isScrubbing) return;
+    const time = getTimeFromPointer(e.clientX);
+    seekTo(time, false);
+  };
+
+  const handleTimelinePointerUp = (e: React.MouseEvent) => {
+    if (!isScrubbing) return;
+    const time = getTimeFromPointer(e.clientX);
+    seekTo(time, true);
+    setIsScrubbing(false);
+  };
+
+  const renderPerformanceTimeline = () => {
+    if (partSegments.length === 0) return null;
+    const playhead = Math.min(1, Math.max(0, currentTime / timelineDuration)) * 100;
+    const loopStart =
+      loopRange ? Math.min(loopRange.start, loopRange.end) : null;
+    const loopEnd =
+      loopRange ? Math.max(loopRange.start, loopRange.end) : null;
+    const palette = [
+      "bg-blue-600",
+      "bg-emerald-600",
+      "bg-amber-600",
+      "bg-purple-600",
+      "bg-rose-600",
+      "bg-teal-600",
+    ];
+    const paletteLight = [
+      "bg-blue-200 text-blue-900",
+      "bg-emerald-200 text-emerald-900",
+      "bg-amber-200 text-amber-900",
+      "bg-purple-200 text-purple-900",
+      "bg-rose-200 text-rose-900",
+      "bg-teal-200 text-teal-900",
+    ];
+    const partColorIndexById = new Map(partSegments.map((seg, idx) => [seg.id, idx]));
+    const subpartSegments = partSegments
+      .flatMap((seg) => {
+        const list = subpartsByPart[seg.id] || [];
+        const colorIdx = partColorIndexById.get(seg.id) ?? 0;
+        return list
+          .map((sub) => {
+            const rawStart =
+              typeof sub.timepoint_seconds === "number"
+                ? sub.timepoint_seconds
+                : Number(sub.timepoint_seconds);
+            if (!Number.isFinite(rawStart)) return null;
+            const clampedStart = Math.min(Math.max(rawStart, seg.start), seg.end - 0.1);
+            const rawEnd =
+              typeof sub.timepoint_end_seconds === "number"
+                ? sub.timepoint_end_seconds
+                : Number(sub.timepoint_end_seconds);
+            const endRaw = Number.isFinite(rawEnd) ? rawEnd : clampedStart + 0.1;
+            const clampedEnd = Math.min(Math.max(endRaw, clampedStart + 0.1), seg.end);
+            if (clampedEnd <= clampedStart) return null;
+            return {
+              id: sub.id,
+              partId: seg.id,
+              title: sub.title,
+              start: clampedStart,
+              end: clampedEnd,
+              colorIdx,
+            };
+          })
+          .filter(Boolean);
       })
-      .filter(Boolean) as Array<{ id: string; title: string; start: number; end: number }>;
-    if (segments.length === 0) return null;
-
-    const partStart =
-      typeof part.timepoint_seconds === "number"
-        ? part.timepoint_seconds
-        : Math.min(...segments.map((s) => s.start));
-    const partEnd =
-      typeof part.timepoint_end_seconds === "number"
-        ? part.timepoint_end_seconds
-        : Math.max(...segments.map((s) => s.end));
-    const total = Math.max(1, partEnd - partStart);
-    const playhead = Math.min(1, Math.max(0, (currentTime - partStart) / total)) * 100;
-
+      .filter(Boolean) as Array<{
+      id: string;
+      partId: string;
+      title: string;
+      start: number;
+      end: number;
+      colorIdx: number;
+    }>;
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-        <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-          Subpart Timeline
+      <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div className="text-xs uppercase tracking-wide text-gray-500">Performance Timeline</div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={togglePlay}
+              disabled={!musicUrl}
+              className="px-3 py-1 bg-gray-900 text-white rounded text-xs disabled:bg-gray-400"
+            >
+              {isPlaying ? "Pause" : "Play"}
+            </button>
+            <div className="text-xs text-gray-600">
+              {formatTime(currentTime)} / {formatTime(timelineDuration)}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              Volume
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={volume}
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                className="w-20"
+              />
+            </label>
+            <button
+              onClick={() => {
+                if (loopSelectMode && pendingLoopRange) {
+                  setLoopRange(pendingLoopRange);
+                  setLoopEnabled(true);
+                  setLoopSelectMode(false);
+                } else {
+                  setLoopSelectMode(true);
+                  setPendingLoopRange(null);
+                }
+              }}
+              className={`px-3 py-1 rounded text-xs ${
+                loopEnabled || loopSelectMode ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {loopSelectMode ? (pendingLoopRange ? "Confirm Loop" : "Select Part") : loopEnabled ? "Loop On" : "Set Loop"}
+            </button>
+            {loopEnabled && (
+              <button
+                onClick={() => {
+                  setLoopEnabled(false);
+                  setLoopRange(null);
+                  setPendingLoopRange(null);
+                  setLoopSelectMode(false);
+                }}
+                className="px-3 py-1 rounded text-xs bg-gray-200 text-gray-700"
+              >
+                Clear Loop
+              </button>
+            )}
+          </div>
         </div>
-        <div className="relative h-16 rounded bg-slate-50 border border-slate-200 overflow-hidden">
-          {segments.map((seg, idx) => {
-            const left = ((seg.start - partStart) / total) * 100;
-            const width = Math.max(2, ((seg.end - seg.start) / total) * 100);
-            const isCurrent = currentSubpartId === seg.id;
-            return (
-              <div key={seg.id}>
-                <div
-                  className={`absolute top-0 h-full text-white text-base font-bold px-2 py-1 flex flex-col items-center justify-center text-center overflow-hidden leading-tight transition-all ${
-                    flashSubpartId === seg.id
-                      ? "bg-emerald-500 border-2 border-emerald-700"
-                      : isCurrent
-                        ? "bg-emerald-600 border-2 border-emerald-800 shadow-[0_0_12px_rgba(16,185,129,0.85)] animate-pulse"
-                        : "bg-orange-700 border-2 border-orange-900"
-                  }`}
+        <div
+          ref={timelineRef}
+          className="relative h-24 rounded bg-slate-50 border border-slate-200 overflow-hidden cursor-pointer"
+          onMouseDown={handleTimelinePointerDown}
+          onMouseMove={handleTimelinePointerMove}
+          onMouseUp={handleTimelinePointerUp}
+          onMouseLeave={handleTimelinePointerUp}
+        >
+          {loopStart !== null && loopEnd !== null && (
+            <div
+              className="absolute top-0 h-full bg-emerald-200/70"
+              style={{
+                left: `${(loopStart / timelineDuration) * 100}%`,
+                width: `${((loopEnd - loopStart) / timelineDuration) * 100}%`,
+              }}
+            />
+          )}
+          <div className="absolute top-0 left-0 right-0 h-14">
+            {partSegments.map((seg, segIdx) => {
+              const left = (seg.start / timelineDuration) * 100;
+              const width = Math.max(1, ((seg.end - seg.start) / timelineDuration) * 100);
+              const isCurrent = currentPart?.id === seg.id;
+              return (
+                <button
+                  key={seg.id}
+                  type="button"
+                  onClick={() => {
+                    if (loopSelectMode) {
+                      setPendingLoopRange({ start: seg.start, end: seg.end });
+                    } else {
+                      seekTo(seg.start, true);
+                    }
+                  }}
+                  className={`absolute top-0 h-full text-base font-semibold px-2 py-1 text-center truncate ${
+                    isCurrent ? "bg-blue-700 text-white" : `${palette[segIdx % palette.length]} text-white`
+                  } ${loopSelectMode && pendingLoopRange?.start === seg.start ? "ring-2 ring-emerald-300" : ""}`}
                   style={{ left: `${left}%`, width: `${width}%` }}
+                  title={seg.name}
                 >
-                  <div>{seg.title}</div>
-                  <div className="text-sm opacity-90">Subpart</div>
-                </div>
-                {idx < segments.length - 1 && (
-                  <div
-                    className="absolute top-0 h-full w-[4px] bg-orange-900"
-                    style={{ left: `${left + width}%` }}
-                  />
-                )}
-              </div>
-            );
-          })}
+                  {seg.name}
+                </button>
+              );
+            })}
+          </div>
+          <div className="absolute bottom-0 left-0 right-0 h-10 border-t border-slate-200 bg-slate-100/80">
+            {subpartSegments.map((seg, idx) => {
+              const left = (seg.start / timelineDuration) * 100;
+              const width = Math.max(1, ((seg.end - seg.start) / timelineDuration) * 100);
+              const borderClass = idx % 2 === 0 ? "border-l border-slate-300" : "border-l border-white/60";
+              return (
+                <button
+                  key={seg.id}
+                  type="button"
+                  onClick={() => seekTo(seg.start, true)}
+                  className={`absolute top-0 h-full text-xs font-semibold px-2 py-1 text-center truncate ${borderClass} ${paletteLight[seg.colorIdx % paletteLight.length]}`}
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                  title={seg.title}
+                >
+                  {seg.title}
+                </button>
+              );
+            })}
+          </div>
           <div
             className="absolute top-0 h-full w-[3px] bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]"
             style={{ left: `${playhead}%` }}
           />
         </div>
-        <div className="mt-1 text-[11px] text-gray-500">
-          {formatTime(partStart)} - {formatTime(partEnd)}
-        </div>
+        {currentPart && (subpartsByPart[currentPart.id] || []).length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(subpartsByPart[currentPart.id] || []).map((sub, idx) => {
+              const start =
+                typeof sub.timepoint_seconds === "number"
+                  ? sub.timepoint_seconds
+                  : null;
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => {
+                    if (start !== null) seekTo(start, true);
+                  }}
+                  className="px-3 py-1 rounded-full text-xs font-semibold bg-white border border-gray-200 hover:bg-gray-50"
+                >
+                  {idx + 1}. {sub.title}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
+
 
   useEffect(() => {
     if (!currentPart) return;
@@ -598,6 +1145,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     <div className="fixed inset-0 z-50 bg-black bg-opacity-70 flex">
       <div className="flex-1 bg-gray-100 overflow-auto">
         <div className="w-full h-full p-6">
+          <audio ref={audioRef} src={musicUrl || undefined} />
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="flex items-center gap-3 mb-1">
@@ -605,6 +1153,11 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                 <div className="text-sm uppercase tracking-wide text-gray-500">Rehearse Mode</div>
               </div>
               <div className="text-3xl font-bold text-gray-900">Live Stage View</div>
+              {performanceTitle && (
+                <div className="text-sm text-gray-600 mt-1">
+                  Performance: <span className="font-semibold text-gray-900">{performanceTitle}</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-4">
               <button
@@ -616,26 +1169,55 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
             </div>
           </div>
 
+          {renderPerformanceTimeline()}
+
           <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-6">
             <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="text-2xl font-semibold text-gray-900 mb-4">Parts</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-2xl font-semibold text-gray-900">Parts</div>
+              </div>
               <div className="text-xs text-gray-500 mb-3">
-                Select a part to jump to that timepoint.
+                Click a part name to play from its start time.
               </div>
               <div className="space-y-5">
                 {filteredParts.map((part, idx) => {
                   const isCurrent = currentPart?.id === part.id;
                   const isNext = nextPart?.id === part.id;
                   const isEditing = editingPartId === part.id;
+                  const partStart = typeof part.timepoint_seconds === "number" ? part.timepoint_seconds : null;
+                  const partEnd = typeof part.timepoint_end_seconds === "number" ? part.timepoint_end_seconds : null;
+                  const partDuration = formatDuration(partStart, partEnd);
+                  const partSubparts = subpartsByPart[part.id] || [];
+                  const isExpanded = expandedPartIds.has(part.id);
                   return (
                     <div
                       key={part.id}
                       className={`border rounded p-2 cursor-pointer transition-colors ${
                         isCurrent ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-white"
                       }`}
+                      onClick={() => {
+                        if (loopSelectMode) {
+                          selectLoopForPart(part.id);
+                        }
+                      }}
+                      onDoubleClick={() => {
+                        if (partStart !== null) seekTo(partStart, true);
+                      }}
                     >
                       <div className="flex items-center justify-between">
-                        <div className="font-semibold text-gray-900 text-xl">{part.name}</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (loopSelectMode) {
+                              selectLoopForPart(part.id);
+                              return;
+                            }
+                            if (partStart !== null) seekTo(partStart, true);
+                          }}
+                          className="font-semibold text-gray-900 text-xl text-left"
+                        >
+                          {part.name}
+                        </button>
                         {isNext && (
                           <span className="text-base font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded">
                             NEXT
@@ -643,107 +1225,179 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                         )}
                       </div>
                       <div className="text-base text-gray-500">
-                        {typeof part.timepoint_seconds === "number" ? formatTime(part.timepoint_seconds) : "No timepoint"}
+                        {partStart !== null ? formatTime(partStart) : "No timepoint"}
+                        {partDuration && <span className="ml-2 text-sm text-gray-400">({partDuration})</span>}
                       </div>
-                      {isEditing ? (
-                        <div className="mt-2 space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <div className="text-[11px] font-semibold text-gray-600">Start (m / s)</div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={editStartMin}
-                                  onChange={(e) => setEditStartMin(e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <input
-                                  type="number"
-                                  step="0.1"
-                                  min="0"
-                                  value={editStartSec}
-                                  onChange={(e) => setEditStartSec(e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[11px] font-semibold text-gray-600">End (m / s)</div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={editEndMin}
-                                  onChange={(e) => setEditEndMin(e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <input
-                                  type="number"
-                                  step="0.1"
-                                  min="0"
-                                  value={editEndSec}
-                                  onChange={(e) => setEditEndSec(e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                const start = composeSeconds(editStartMin, editStartSec);
-                                const end = composeSeconds(editEndMin, editEndSec);
-                                setSavingPartId(part.id);
-                                try {
-                                  const res = await fetch(`/api/parts/${part.id}`, {
-                                    method: "PUT",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      timepoint_seconds: start,
-                                      timepoint_end_seconds: end,
-                                    }),
-                                  });
-                                  if (!res.ok) {
-                                    const data = await res.json().catch(() => null);
-                                    throw new Error(data?.details || data?.error || "Failed to update timepoints");
-                                  }
-                                  const updated = await res.json();
-                                  setPartTimeOverrides((prev) => ({
-                                    ...prev,
-                                    [part.id]: { start, end },
-                                  }));
-                                  onUpdatePartTimepoints?.(updated);
-                                  setEditingPartId(null);
-                                } catch (err) {
-                                  console.error("Failed to update timepoints:", err);
-                                  alert("Failed to update timepoints");
-                                } finally {
-                                  setSavingPartId(null);
-                                }
-                              }}
-                              className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 disabled:opacity-50"
-                              disabled={savingPartId === part.id}
-                            >
-                              {savingPartId === part.id ? "Saving..." : "Save"}
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingPartId(null);
-                              }}
-                              className="px-2 py-1 bg-gray-300 text-gray-800 rounded text-xs hover:bg-gray-400"
-                            >
-                              Cancel
-                            </button>
-                          </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        {partStart !== null && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startJumpCountdown(partStart, part.id);
+                            }}
+                            className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                          >
+                            Jump to part
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setExpandedPartIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(part.id)) next.delete(part.id);
+                              else next.add(part.id);
+                              return next;
+                            });
+                          }}
+                          className="px-3 py-1 text-xs rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        >
+                          {isExpanded ? "Hide Details" : "Expand Details"}
+                        </button>
+                      </div>
+                      {!isExpanded && partSubparts.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {partSubparts.map((sub, subIdx) => {
+                            const subStart =
+                              typeof sub.timepoint_seconds === "number"
+                                ? sub.timepoint_seconds
+                                : null;
+                            return (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => {
+                                  if (subStart !== null) seekTo(subStart, true);
+                                }}
+                                className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-700"
+                              >
+                                {subIdx + 1}. {sub.title}
+                              </button>
+                            );
+                          })}
                         </div>
-                      ) : (
+                      )}
+                      {isExpanded && (
+                        <>
+                          {isEditing ? (
+                            <div className="mt-2 space-y-2">
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <div className="text-[11px] font-semibold text-gray-600">Start (m / s)</div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={editStartMin}
+                                      onChange={(e) => setEditStartMin(e.target.value)}
+                                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={editStartSec}
+                                      onChange={(e) => setEditStartSec(e.target.value)}
+                                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[11px] font-semibold text-gray-600">End (m / s)</div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={editEndMin}
+                                      onChange={(e) => setEditEndMin(e.target.value)}
+                                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={editEndSec}
+                                      onChange={(e) => setEditEndSec(e.target.value)}
+                                      className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                              {timeError && (
+                                <div className="text-[11px] text-red-600">{timeError}</div>
+                              )}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    let start = composeSeconds(editStartMin, editStartSec);
+                                    let end = composeSeconds(editEndMin, editEndSec);
+                                    const bounds = getSubpartBounds(part.id);
+                                    if (bounds.minStart !== null) {
+                                      if (start === null || start > bounds.minStart) start = bounds.minStart;
+                                    }
+                                    if (bounds.maxEnd !== null) {
+                                      if (end === null || end < bounds.maxEnd) end = bounds.maxEnd;
+                                    }
+                                    if (duration > 0) {
+                                      if ((start !== null && start > duration) || (end !== null && end > duration)) {
+                                        setTimeError("Time exceeds music length. Use a time within the track.");
+                                        return;
+                                      }
+                                    }
+                                    if (start !== null && end !== null && end < start) {
+                                      setTimeError("End time must be after start time.");
+                                      return;
+                                    }
+                                    setTimeError(null);
+                                    setSavingPartId(part.id);
+                                    try {
+                                      const res = await fetch(`/api/parts/${part.id}`, {
+                                        method: "PUT",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                          timepoint_seconds: start,
+                                          timepoint_end_seconds: end,
+                                        }),
+                                      });
+                                      if (!res.ok) {
+                                        const data = await res.json().catch(() => null);
+                                        throw new Error(data?.details || data?.error || "Failed to update timepoints");
+                                      }
+                                      const updated = await res.json();
+                                      setPartTimeOverrides((prev) => ({
+                                        ...prev,
+                                        [part.id]: { start, end },
+                                      }));
+                                      onUpdatePartTimepoints?.(updated);
+                                      setEditingPartId(null);
+                                    } catch (err) {
+                                      console.error("Failed to update timepoints:", err);
+                                      alert("Failed to update timepoints");
+                                    } finally {
+                                      setSavingPartId(null);
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 disabled:opacity-50"
+                                  disabled={savingPartId === part.id}
+                                >
+                                  {savingPartId === part.id ? "Saving..." : "Save"}
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingPartId(null);
+                                  }}
+                                  className="px-2 py-1 bg-gray-300 text-gray-800 rounded text-xs hover:bg-gray-400"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
                         <div className="mt-1">
                           <button
                             onClick={(e) => {
@@ -759,6 +1413,31 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                       {isNext && timeToNext !== null && timeToNext <= 10 && (
                         <div className="text-4xl font-extrabold text-red-600 animate-pulse">
                           {Math.ceil(timeToNext)}
+                        </div>
+                      )}
+                      {isExpanded && (
+                        <div className="mt-3">
+                          <div className="text-[11px] font-semibold text-gray-600 mb-1">Notes</div>
+                          <textarea
+                            value={noteDrafts[getNoteKey(part.id)] ?? notesByKey[getNoteKey(part.id)] ?? ""}
+                            onChange={(e) =>
+                              setNoteDrafts((prev) => ({ ...prev, [getNoteKey(part.id)]: e.target.value }))
+                            }
+                            onBlur={() => saveNote(part.id)}
+                            rows={2}
+                            placeholder="Add notes for this part..."
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                          />
+                          <div className="mt-1 flex items-center gap-2">
+                            <button
+                              onClick={() => saveNote(part.id)}
+                              className="px-2 py-0.5 bg-gray-900 text-white rounded text-[11px]"
+                              disabled={noteSaving[getNoteKey(part.id)]}
+                            >
+                              {noteSaving[getNoteKey(part.id)] ? "Saving..." : "Save note"}
+                            </button>
+                            <span className="text-[10px] text-gray-400">Auto-saves on blur</span>
+                          </div>
                         </div>
                       )}
                       <div className="text-base text-gray-600 mt-1">
@@ -795,9 +1474,19 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                                 key={sub.id}
                                 className={hasTime ? "" : ""}
                               >
-                                <div className="font-semibold text-gray-900">
-                                  {subIdx + 1}. {sub.title}
-                                </div>
+                                {hasTime ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => seekTo(parsedStart, true)}
+                                    className="font-semibold text-gray-900 text-left"
+                                  >
+                                    {subIdx + 1}. {sub.title}
+                                  </button>
+                                ) : (
+                                  <div className="font-semibold text-gray-900">
+                                    {subIdx + 1}. {sub.title}
+                                  </div>
+                                )}
                                 <div className="text-gray-600">
                                   Assigned:{" "}
                                   {assigned.length === 0
@@ -813,6 +1502,35 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                                 </div>
                                 <div className="text-gray-500">
                                   Notes: {sub.description ? sub.description : "—"}
+                                </div>
+                                {notesByKey[getNoteKey(part.id, sub.id)] && (
+                                  <div className="text-[10px] text-gray-500 mt-1">
+                                    Note: {notesByKey[getNoteKey(part.id, sub.id)]}
+                                  </div>
+                                )}
+                                <div className="mt-1">
+                                  <textarea
+                                    value={noteDrafts[getNoteKey(part.id, sub.id)] ?? notesByKey[getNoteKey(part.id, sub.id)] ?? ""}
+                                    onChange={(e) =>
+                                      setNoteDrafts((prev) => ({
+                                        ...prev,
+                                        [getNoteKey(part.id, sub.id)]: e.target.value,
+                                      }))
+                                    }
+                                    onBlur={() => saveNote(part.id, sub.id)}
+                                    rows={2}
+                                    placeholder="Add rehearsal notes..."
+                                    className="w-full px-2 py-1 border border-gray-200 rounded text-[11px]"
+                                  />
+                                  <div className="mt-1 flex items-center gap-2">
+                                    <button
+                                      onClick={() => saveNote(part.id, sub.id)}
+                                      className="px-2 py-0.5 bg-gray-900 text-white rounded text-[10px]"
+                                      disabled={noteSaving[getNoteKey(part.id, sub.id)]}
+                                    >
+                                      {noteSaving[getNoteKey(part.id, sub.id)] ? "Saving..." : "Save note"}
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="text-[11px] text-gray-500">
                                   Time: {Number.isFinite(parsedStart) ? formatTime(parsedStart) : "--:--"} / {Number.isFinite(parsedEnd) ? formatTime(parsedEnd) : "--:--"}
@@ -833,29 +1551,12 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                           })}
                         </div>
                       )}
-                      <div className="mt-3">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const rawTime = (part as any).timepoint_seconds;
-                            const startTime =
-                              typeof rawTime === "number"
-                                ? rawTime
-                                : rawTime !== null && rawTime !== undefined
-                                  ? parseFloat(rawTime)
-                                  : null;
-                            if (startTime === null || Number.isNaN(startTime)) return;
-                            startJumpCountdown(startTime, part.id);
-                          }}
-                          className="text-xs text-blue-700 hover:text-blue-900 underline"
-                        >
-                          Jump to part
-                        </button>
-                      </div>
                       {countdownTargetPartId === part.id && countdown !== null && (
                         <div className="mt-2 text-center text-3xl font-extrabold text-red-600 animate-pulse">
                           {countdown}
                         </div>
+                      )}
+                        </>
                       )}
                     </div>
                   );
@@ -864,83 +1565,16 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
             </div>
 
               <div className="space-y-6">
-                {renderTimeline(currentPart)}
-                <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6">
-                  {renderGrid("Next", nextPart, true)}
-                  {renderGrid("Current", currentPart, false)}
-                </div>
-
-                <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rounded-full bg-blue-600" />
-                    Current part
+                <div className="grid grid-cols-1 xl:grid-cols-[minmax(260px,0.6fr)_minmax(420px,1fr)] gap-6 items-start">
+                  <div className="space-y-3">
+                    {renderGrid("Current", currentPart, false, CURRENT_CELL_SIZE)}
+                    {renderNamesBox(currentPart, false)}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rounded-full bg-purple-600" />
-                    Next part
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rounded-full bg-blue-600 border border-blue-800" />
-                    Student position
+                  <div className="space-y-3">
+                    {renderGrid("Next", nextPart, true, NEXT_CELL_SIZE)}
+                    {renderNamesBox(nextPart, true)}
                   </div>
                 </div>
-                {(currentPart || nextPart) && (
-                  <div className="bg-white border border-gray-200 rounded-lg p-3 text-xs text-gray-700">
-                    <div className="font-semibold text-gray-900 mb-2">Legend</div>
-                    <div className="space-y-3">
-                      <div>
-                        <div className="text-[11px] font-semibold text-blue-700 uppercase tracking-wide mb-2">
-                          Current Part
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {Array.from(
-                            new Map(
-                              (currentPart ? positionsByPart[currentPart.id] || [] : []).map((p) => [
-                                p.student_id,
-                                p,
-                              ])
-                            ).values()
-                          ).map((pos) => (
-                            <div key={`current-${currentPart?.id}-${pos.student_id}`} className="flex items-center gap-2">
-                              <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold">
-                                {getInitials(pos.student_name)}
-                              </div>
-                              <span className="truncate">{pos.student_name}</span>
-                            </div>
-                          ))}
-                          {(currentPart ? positionsByPart[currentPart.id] || [] : []).length === 0 && (
-                            <div className="text-[11px] text-gray-500">No positions</div>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-semibold text-purple-700 uppercase tracking-wide mb-2">
-                          Next Part
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {Array.from(
-                            new Map(
-                              (nextPart ? positionsByPart[nextPart.id] || [] : []).map((p) => [
-                                p.student_id,
-                                p,
-                              ])
-                            ).values()
-                          ).map((pos) => (
-                            <div key={`next-${nextPart?.id}-${pos.student_id}`} className="flex items-center gap-2">
-                              <div className="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold">
-                                {getInitials(pos.student_name)}
-                              </div>
-                              <span className="truncate">{pos.student_name}</span>
-                            </div>
-                          ))}
-                          {(nextPart ? positionsByPart[nextPart.id] || [] : []).length === 0 && (
-                            <div className="text-[11px] text-gray-500">No positions</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="min-h-[180px]">{renderSubpartOverlay(currentPart)}</div>
@@ -981,11 +1615,6 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                       </label>
                     </div>
                   </div>
-                  <MusicPlayer
-                    musicUrl={musicUrl || undefined}
-                    onTimeUpdate={(t) => setCurrentTime(t)}
-                    audioRef={audioRef}
-                  />
                 </div>
               </div>
           </div>
@@ -994,3 +1623,8 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     </div>
   );
 }
+
+
+
+
+

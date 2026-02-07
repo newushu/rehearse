@@ -88,3 +88,26 @@ export interface SoloAssignment {
   updated_at: string;
   student_name?: string;
 }
+
+export interface UniformType {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface UniformItem {
+  id: string;
+  uniform_type_id: string;
+  item_number: string;
+  created_at: string;
+}
+
+export interface UniformAssignment {
+  id: string;
+  uniform_item_id: string;
+  student_id: string | null;
+  student_name: string | null;
+  performance_id: string | null;
+  distributed_at: string;
+  returned_at: string | null;
+}

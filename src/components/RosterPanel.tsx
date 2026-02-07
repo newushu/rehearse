@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { AppLogo } from "@/components/AppLogo";
+import { DEFAULT_TIMEZONE, formatTimeString, getDateKeyInTimeZone } from "@/lib/datetime";
 import { useRehearsals } from "@/hooks/useRehearsals";
 import { Rehearsal, RehearsalAttendance } from "@/types";
 
@@ -232,7 +233,7 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
       const dateOnly = normalizeDateOnly(value);
       if (!dateOnly) return new Date(value);
       const [y, m, d] = dateOnly.split("-").map(Number);
-      return new Date(y, (m || 1) - 1, d || 1);
+      return new Date(Date.UTC(y, (m || 1) - 1, d || 1, 12, 0, 0));
     },
     [normalizeDateOnly]
   );
@@ -244,15 +245,18 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
   }, [rehearsals, toLocalDate]);
 
   const isFutureRehearsal = (rehearsal: Rehearsal) => {
-    const rehearsalDate = toLocalDate(rehearsal.date);
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    return rehearsalDate.getTime() > todayStart.getTime();
+    const todayKey = getDateKeyInTimeZone(new Date().toISOString(), DEFAULT_TIMEZONE);
+    const rehearsalKey = normalizeDateOnly(rehearsal.date);
+    return rehearsalKey > todayKey;
   };
 
   const formatRehearsalDate = (date: string) => {
     const local = toLocalDate(date);
-    return local.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
+    return local.toLocaleDateString(undefined, {
+      month: "numeric",
+      day: "numeric",
+      timeZone: DEFAULT_TIMEZONE,
+    });
   };
 
   const rosterStudentIds = useMemo(() => {
@@ -487,7 +491,7 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
                     <div className="mt-1 flex flex-wrap gap-1">
                       {performanceDate && (
                         <div
-                          title={`Performance â€¢ ${toLocalDate(performanceDate).toLocaleDateString()}`}
+                          title={`Performance â€¢ ${formatRehearsalDate(performanceDate)} ET`}
                           className="h-7 w-9 border bg-gray-200 text-gray-700 border-gray-300 text-[9px] leading-tight rounded flex flex-col items-center justify-center font-semibold opacity-90"
                         >
                           <span>{formatRehearsalDate(performanceDate)}</span>
@@ -510,7 +514,7 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
                             type="button"
                             onClick={() => toggleAttendance(rehearsal.id, student.student_id, isFuture)}
                             disabled={attendanceLoading}
-                            title={`${rehearsal.title} • ${toLocalDate(rehearsal.date).toLocaleDateString()} ${rehearsal.time}`}
+                            title={`${rehearsal.title} • ${formatRehearsalDate(rehearsal.date)} ${formatTimeString(rehearsal.time)} ET`}
                             className={`h-7 w-9 border text-[9px] leading-tight rounded flex flex-col items-center justify-center font-semibold ${colorClass} ${isFuture ? "opacity-70 cursor-not-allowed" : "hover:opacity-90"}`}
                           >
                             <span>{formatRehearsalDate(rehearsal.date)}</span>

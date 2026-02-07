@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { AppLogo } from "@/components/AppLogo";
 
 interface RosterStudent {
@@ -22,6 +22,8 @@ interface PositioningPanelProps {
   partId: string;
   partName?: string | null;
   partDescription?: string | null;
+  partTimepointSeconds?: number | null;
+  partTimepointEndSeconds?: number | null;
   isGroup?: boolean;
   onSavePositions: (positions: PositionEntry[]) => Promise<void>;
 }
@@ -56,6 +58,8 @@ export function PositioningPanel({
   partId,
   partName = null,
   partDescription = null,
+  partTimepointSeconds = null,
+  partTimepointEndSeconds = null,
   isGroup = true,
   onSavePositions,
 }: PositioningPanelProps) {
@@ -68,19 +72,31 @@ export function PositioningPanel({
   const [error, setError] = useState<string | null>(null);
   const [frontDirection, setFrontDirection] = useState<FrontDirection>("bottom");
   const [lastSavedTime, setLastSavedTime] = useState<number>(Date.now());
+  const gridWrapRef = useRef<HTMLDivElement>(null);
+  const [gridScale, setGridScale] = useState(1);
+  const baseWidth = GRID_COLS * CELL_SIZE;
+  const baseHeight = GRID_ROWS * CELL_SIZE;
   const autoSaveIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
   const hasChangesRef = React.useRef(false);
-  const [subparts, setSubparts] = useState<Array<{ id: string; title: string; description?: string | null; mode?: string }>>([]);
+  const [subparts, setSubparts] = useState<Array<{ id: string; title: string; description?: string | null; mode?: string; timepoint_seconds?: number | null; timepoint_end_seconds?: number | null }>>([]);
   const [selectedSubpartId, setSelectedSubpartId] = useState<string | null>(null);
   const [subpartPositions, setSubpartPositions] = useState<Record<string, PositionEntry[]>>({});
   const [subpartOrder, setSubpartOrder] = useState<Record<string, Array<{ id: string; student_id: string; student_name: string }>>>({});
   const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null);
+  const [draggingSubpartId, setDraggingSubpartId] = useState<string | null>(null);
   const [editingPartName, setEditingPartName] = useState(false);
   const [partNameDraft, setPartNameDraft] = useState(partName || "");
   const [partNameSaving, setPartNameSaving] = useState(false);
   const [editingPartNotes, setEditingPartNotes] = useState(false);
   const [partNotesDraft, setPartNotesDraft] = useState(partDescription || "");
   const [partNotesSaving, setPartNotesSaving] = useState(false);
+  const [editingPartTime, setEditingPartTime] = useState(false);
+  const [partStartMin, setPartStartMin] = useState("");
+  const [partStartSec, setPartStartSec] = useState("");
+  const [partEndMin, setPartEndMin] = useState("");
+  const [partEndSec, setPartEndSec] = useState("");
+  const [partTimeSaving, setPartTimeSaving] = useState(false);
+  const [partTimeOverride, setPartTimeOverride] = useState<{ start: number | null; end: number | null } | null>(null);
   const [sourceOptions, setSourceOptions] = useState<Array<{ key: string; label: string }>>([]);
   const [selectedSourceKey, setSelectedSourceKey] = useState("");
   const [flipHorizontal, setFlipHorizontal] = useState(false);
@@ -92,14 +108,29 @@ export function PositioningPanel({
       if (subRes.ok) {
         const subData = await subRes.json();
         setSubparts(subData || []);
-        if ((subData || []).length === 0) {
+        const ids = new Set((subData || []).map((s: any) => s.id));
+        if ((subData || []).length === 0 || (selectedSubpartId && !ids.has(selectedSubpartId))) {
           setSelectedSubpartId(null);
         }
       }
     } catch (err) {
       console.error("Error fetching subparts:", err);
     }
-  }, [partId]);
+  }, [partId, selectedSubpartId]);
+
+  const fetchRosterOnly = useCallback(async () => {
+    try {
+      const rosterRes = await fetch(`/api/performances/${performanceId}/roster`);
+      if (!rosterRes.ok) throw new Error("Failed to fetch roster");
+      const rosterData = await rosterRes.json();
+      const partRoster = rosterData.filter(
+        (s: any) => s.part_id === partId || !s.part_id
+      );
+      setRoster(partRoster);
+    } catch (err) {
+      console.error("Error fetching roster:", err);
+    }
+  }, [performanceId, partId]);
 
   // Fetch roster, existing positions, and performance orientation
   useEffect(() => {
@@ -115,16 +146,7 @@ export function PositioningPanel({
         }
 
         // Fetch roster
-        const rosterRes = await fetch(`/api/performances/${performanceId}/roster`);
-        if (!rosterRes.ok) throw new Error("Failed to fetch roster");
-        const rosterData = await rosterRes.json();
-
-        
-        // Filter for this part
-        const partRoster = rosterData.filter(
-          (s: any) => s.part_id === partId || !s.part_id
-        );
-        setRoster(partRoster);
+        await fetchRosterOnly();
 
         // Fetch subparts
         await fetchSubparts();
@@ -151,7 +173,29 @@ export function PositioningPanel({
     }
 
     fetchData();
-  }, [performanceId, partId, isGroup, fetchSubparts]);
+  }, [performanceId, partId, isGroup, fetchSubparts, fetchRosterOnly]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      fetchRosterOnly();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchRosterOnly]);
+
+  useEffect(() => {
+    const el = gridWrapRef.current;
+    if (!el) return;
+    const updateScale = () => {
+      const width = el.clientWidth;
+      if (!width) return;
+      setGridScale(Math.min(1, width / baseWidth));
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [baseWidth]);
 
   useEffect(() => {
     setPartNameDraft(partName || "");
@@ -160,6 +204,23 @@ export function PositioningPanel({
   useEffect(() => {
     setPartNotesDraft(partDescription || "");
   }, [partDescription]);
+
+  useEffect(() => {
+    setPartTimeOverride({
+      start: typeof partTimepointSeconds === "number" ? partTimepointSeconds : null,
+      end: typeof partTimepointEndSeconds === "number" ? partTimepointEndSeconds : null,
+    });
+    const startSplit = splitTime(partTimepointSeconds ?? null);
+    const endSplit = splitTime(partTimepointEndSeconds ?? null);
+    setPartStartMin(startSplit.min);
+    setPartStartSec(startSplit.sec);
+    setPartEndMin(endSplit.min);
+    setPartEndSec(endSplit.sec);
+  }, [partTimepointSeconds, partTimepointEndSeconds]);
+
+  useEffect(() => {
+    setSelectedSubpartId(null);
+  }, [partId]);
 
   const loadSources = useCallback(async () => {
     try {
@@ -316,6 +377,7 @@ export function PositioningPanel({
   const handleDragStart = (studentId: string, fromGrid: boolean = false) => {
     setDraggedStudent(studentId);
     setDraggedFromGrid(fromGrid);
+    setDraggingOrderId(null);
   };
 
   const handleGridDragOver = (e: React.DragEvent) => {
@@ -340,6 +402,37 @@ export function PositioningPanel({
     if (value < 0) return 0;
     if (value > max) return max;
     return value;
+  };
+
+  const formatDuration = (start: number | null | undefined, end: number | null | undefined) => {
+    if (typeof start !== "number" || typeof end !== "number") return "";
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return "";
+    const total = Math.max(0, end - start);
+    const mins = Math.floor(total / 60);
+    const secs = Math.round(total % 60);
+    return `${mins}m ${secs}s`;
+  };
+
+  const formatTime = (value: number | null | undefined) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return "--:--";
+    const total = Math.max(0, Math.floor(value));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const splitTime = (value: number | null | undefined) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return { min: "", sec: "" };
+    const total = Math.max(0, Math.floor(value));
+    return { min: String(Math.floor(total / 60)), sec: String(total % 60) };
+  };
+
+  const composeSeconds = (minStr: string, secStr: string) => {
+    if (!minStr && !secStr) return null;
+    const mins = minStr ? parseInt(minStr, 10) : 0;
+    const secs = secStr ? parseFloat(secStr) : 0;
+    if (Number.isNaN(mins) || Number.isNaN(secs)) return null;
+    return mins * 60 + secs;
   };
 
   const handleGridDrop = async (e: React.DragEvent, x: number, y: number) => {
@@ -527,6 +620,28 @@ export function PositioningPanel({
     await persistOrder(next);
   }, [persistOrder, selectedSubpartId]);
 
+  const handleReorderSubparts = useCallback(async (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= subparts.length) return;
+    const next = [...subparts];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setSubparts(next);
+    try {
+      await Promise.all(
+        next.map((sub, idx) =>
+          fetch(`/api/subparts/${sub.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ order: idx + 1 }),
+          })
+        )
+      );
+    } catch (err) {
+      console.error("Error reordering subparts:", err);
+      await fetchSubparts();
+    }
+  }, [subparts, fetchSubparts]);
+
   useEffect(() => {
     if (!selectedSubpartId) return;
     const positionsList = subpartPositions[selectedSubpartId] || [];
@@ -606,10 +721,26 @@ export function PositioningPanel({
   };
 
   const activeSubpart = subparts.find((s) => s.id === selectedSubpartId);
+  const subpartDuration = activeSubpart
+    ? formatDuration(activeSubpart.timepoint_seconds as any, activeSubpart.timepoint_end_seconds as any)
+    : "";
+  const effectivePartStart = partTimeOverride?.start ?? partTimepointSeconds ?? null;
+  const effectivePartEnd = partTimeOverride?.end ?? partTimepointEndSeconds ?? null;
+  const partDuration = formatDuration(effectivePartStart, effectivePartEnd);
   const subpartMode = activeSubpart?.mode || "position";
   const canPosition = subparts.length === 0 || subpartMode !== "order";
   const canOrder = subparts.length > 0;
-  const orderItems = selectedSubpartId ? subpartOrder[selectedSubpartId] || [] : [];
+  const orderItems = useMemo(
+    () => (selectedSubpartId ? subpartOrder[selectedSubpartId] || [] : []),
+    [selectedSubpartId, subpartOrder]
+  );
+  const orderIndexByStudentId = useMemo(() => {
+    const map: Record<string, number> = {};
+    orderItems.forEach((item, idx) => {
+      if (item.student_id) map[item.student_id] = idx + 1;
+    });
+    return map;
+  }, [orderItems]);
 
   const activePositions =
     selectedSubpartId && subparts.length > 0
@@ -646,7 +777,7 @@ export function PositioningPanel({
 
       <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6">
         {/* Roster List */}
-        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 hidden lg:block">
           <h3 className="font-semibold text-gray-900 mb-2">
             Students ({availableStudents.length})
           </h3>
@@ -701,7 +832,9 @@ export function PositioningPanel({
                 className="bg-white p-2 rounded border border-gray-200"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={async () => {
+                  if (draggingOrderId) return;
                   if (!draggedStudent) return;
+                  if (orderItems.some((item) => item.student_id === draggedStudent)) return;
                   const student = roster.find((s) => s.student_id === draggedStudent);
                   if (!student) return;
                   await addToOrder(student.student_id, student.name);
@@ -717,7 +850,11 @@ export function PositioningPanel({
                       <div
                         key={item.id}
                         draggable
-                        onDragStart={() => setDraggingOrderId(item.id)}
+                        onDragStart={() => {
+                          setDraggingOrderId(item.id);
+                          setDraggedStudent(null);
+                          setDraggedFromGrid(false);
+                        }}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={async () => {
                           if (!draggingOrderId) return;
@@ -749,6 +886,30 @@ export function PositioningPanel({
                     ))
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {!selectedSubpartId && (
+            <div className="mt-4 border-t border-gray-200 pt-4">
+              <h4 className="font-medium text-gray-900 mb-2 text-sm">
+                Assigned Students (Part)
+              </h4>
+              <div className="bg-white p-2 rounded border border-gray-200">
+                {positions.length === 0 ? (
+                  <div className="text-xs text-gray-500 text-center">No positioned students</div>
+                ) : (
+                  <div className="space-y-2">
+                    {positions.map((pos, idx) => (
+                      <div
+                        key={pos.id || `${pos.student_id}-${idx}`}
+                        className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded px-2 py-1"
+                      >
+                        <div className="text-xs text-gray-900">{pos.name}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -811,8 +972,8 @@ export function PositioningPanel({
                     </div>
                   ) : (
                     <>
-                      <span className="text-sm text-gray-700">
-                        {partName ? `- ${partName}` : ""}
+                      <span className="text-xl font-semibold text-gray-900">
+                        {partName ? partName : ""}
                       </span>
                       <button
                         onClick={() => setEditingPartName(true)}
@@ -885,6 +1046,122 @@ export function PositioningPanel({
                       </button>
                     </div>
                   )}
+                  {partDuration && (
+                    <div className="mt-1 text-xs text-gray-500">
+                      Duration: {partDuration}
+                    </div>
+                  )}
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold text-gray-600">Timepoint</div>
+                      {!editingPartTime && (
+                        <button
+                          onClick={() => setEditingPartTime(true)}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Edit time
+                        </button>
+                      )}
+                    </div>
+                    {editingPartTime ? (
+                      <div className="mt-2 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <div className="text-[10px] text-gray-500">Start (m / s)</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                value={partStartMin}
+                                onChange={(e) => setPartStartMin(e.target.value)}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                              />
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                value={partStartSec}
+                                onChange={(e) => setPartStartSec(e.target.value)}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-gray-500">End (m / s)</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                value={partEndMin}
+                                onChange={(e) => setPartEndMin(e.target.value)}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                              />
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                value={partEndSec}
+                                onChange={(e) => setPartEndSec(e.target.value)}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              const start = composeSeconds(partStartMin, partStartSec);
+                              const end = composeSeconds(partEndMin, partEndSec);
+                              if (start !== null && end !== null && end < start) {
+                                alert("End time must be after start time.");
+                                return;
+                              }
+                              setPartTimeSaving(true);
+                              try {
+                                const res = await fetch(`/api/parts/${partId}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    timepoint_seconds: start,
+                                    timepoint_end_seconds: end,
+                                  }),
+                                });
+                                if (!res.ok) throw new Error("Failed to update timepoint");
+                                setPartTimeOverride({ start, end });
+                                setEditingPartTime(false);
+                              } catch (err) {
+                                alert(err instanceof Error ? err.message : "Failed to update timepoint");
+                              } finally {
+                                setPartTimeSaving(false);
+                              }
+                            }}
+                            disabled={partTimeSaving}
+                            className="px-2 py-1 bg-emerald-600 text-white rounded text-xs disabled:bg-gray-400"
+                          >
+                            {partTimeSaving ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              const startSplit = splitTime(effectivePartStart);
+                              const endSplit = splitTime(effectivePartEnd);
+                              setPartStartMin(startSplit.min);
+                              setPartStartSec(startSplit.sec);
+                              setPartEndMin(endSplit.min);
+                              setPartEndSec(endSplit.sec);
+                              setEditingPartTime(false);
+                            }}
+                            className="px-2 py-1 bg-gray-300 text-gray-800 rounded text-xs"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-xs text-gray-600">
+                        {formatTime(effectivePartStart)} - {formatTime(effectivePartEnd)}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
                   Front of stage: {frontDirection === "bottom" ? "Bottom" : "Top"}
@@ -913,6 +1190,11 @@ export function PositioningPanel({
                 {activeSubpart?.description && (
                   <span className="text-[10px] text-gray-500">
                     {activeSubpart.description}
+                  </span>
+                )}
+                {subpartDuration && (
+                  <span className="text-[10px] text-gray-500">
+                    Duration: {subpartDuration}
                   </span>
                 )}
               </div>
@@ -952,6 +1234,39 @@ export function PositioningPanel({
                 </div>
               </div>
             </div>
+
+            {subparts.length > 0 && (
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <div className="text-xs font-semibold text-gray-700 mb-2">Subparts</div>
+                <div className="flex flex-wrap gap-2">
+                  {subparts.map((sub, idx) => (
+                    <button
+                      key={sub.id}
+                      draggable
+                      onDragStart={() => setDraggingSubpartId(sub.id)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (!draggingSubpartId) return;
+                        const fromIdx = subparts.findIndex((s) => s.id === draggingSubpartId);
+                        const toIdx = subparts.findIndex((s) => s.id === sub.id);
+                        if (fromIdx < 0 || toIdx < 0) return;
+                        handleReorderSubparts(fromIdx, toIdx);
+                        setDraggingSubpartId(null);
+                      }}
+                      onClick={() => setSelectedSubpartId(sub.id)}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                        selectedSubpartId === sub.id
+                          ? "bg-blue-600 text-white border-blue-700"
+                          : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                      }`}
+                      title="Drag to reorder"
+                    >
+                      {idx + 1}. {sub.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Legend */}
             {activePositions.length > 0 && (
@@ -1025,93 +1340,107 @@ export function PositioningPanel({
                 </button>
               )}
               <div
-                className="border-2 border-gray-400 bg-gradient-to-b from-amber-100 to-amber-50 relative mx-auto"
-                style={{
-                  width: GRID_COLS * CELL_SIZE,
-                  height: GRID_ROWS * CELL_SIZE,
-                  backgroundImage: `
+                ref={gridWrapRef}
+                className="w-full overflow-hidden"
+                style={{ height: baseHeight * gridScale }}
+              >
+                <div
+                  className="border-2 border-gray-400 bg-gradient-to-b from-amber-100 to-amber-50 relative mx-auto"
+                  style={{
+                    width: baseWidth,
+                    height: baseHeight,
+                    backgroundImage: `
                   linear-gradient(rgba(0,0,0,.1) 1px, transparent 1px),
                   linear-gradient(90deg, rgba(0,0,0,.1) 1px, transparent 1px)
                 `,
-                  backgroundSize: `${CELL_SIZE}px ${CELL_SIZE}px`,
-                }}
-                onDragOver={handleGridDragOver}
-              >
-              {/* Front of Stage Indicator */}
-              {frontDirection === "bottom" && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-500"></div>
-              )}
-              {frontDirection === "top" && (
-                <div className="absolute top-0 left-0 right-0 h-1 bg-red-500"></div>
-              )}
+                    backgroundSize: `${CELL_SIZE}px ${CELL_SIZE}px`,
+                    transform: `scale(${gridScale})`,
+                    transformOrigin: "top left",
+                  }}
+                  onDragOver={handleGridDragOver}
+                >
+                  {/* Front of Stage Indicator */}
+                  {frontDirection === "bottom" && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-red-500"></div>
+                  )}
+                  {frontDirection === "top" && (
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-red-500"></div>
+                  )}
 
-              {/* Front Label */}
-              <div
-                className="absolute text-red-600 font-bold text-xs bg-white bg-opacity-80 px-2 py-1 rounded"
-                style={{
-                  ...(frontDirection === "bottom" && { bottom: 5, left: "50%", transform: "translateX(-50%)" }),
-                  ...(frontDirection === "top" && { top: 5, left: "50%", transform: "translateX(-50%)" }),
-                }}
-              >
-                FRONT
-              </div>
-
-              {selectedSubpartId && subparts.length > 0 && activePositions.length === 0 && (
-                <div className="absolute top-8 left-0 right-0 text-center text-2xl font-bold text-gray-500">
-                  {activeSubpart?.title || "Subpart"}
-                </div>
-              )}
-
-              {/* Grid Cells */}
-              {Array.from({ length: GRID_ROWS }).map((_, y) =>
-                Array.from({ length: GRID_COLS }).map((_, x) => (
+                  {/* Front Label */}
                   <div
-                    key={`${x}-${y}`}
-                    onDrop={(e) => handleGridDrop(e, x, y)}
-                    onDragOver={handleGridDragOver}
-                    className="absolute cursor-cell hover:bg-blue-100 hover:bg-opacity-30 transition-colors"
+                    className="absolute text-red-600 font-bold text-xs bg-white bg-opacity-80 px-2 py-1 rounded"
                     style={{
-                      left: x * CELL_SIZE,
-                      top: y * CELL_SIZE,
-                      width: CELL_SIZE,
-                      height: CELL_SIZE,
-                    }}
-                  />
-                ))
-              )}
-
-              {/* Positioned Students */}
-              {activePositions.map((pos, idx) => {
-                const initials = generateInitials(pos.name, activePositions.map((p) => p.name));
-                return (
-                  <div
-                    key={pos.id || `${pos.student_id}-${pos.x}-${pos.y}-${idx}`}
-                    draggable
-                    onDragStart={() => handleDragStart(pos.student_id, true)}
-                    className="absolute flex items-center justify-center group cursor-move"
-                    style={{
-                      left: toDisplayX(pos.x) * CELL_SIZE,
-                      top: toDisplayY(pos.y) * CELL_SIZE,
-                      width: CELL_SIZE,
-                      height: CELL_SIZE,
+                      ...(frontDirection === "bottom" && { bottom: 5, left: "50%", transform: "translateX(-50%)" }),
+                      ...(frontDirection === "top" && { top: 5, left: "50%", transform: "translateX(-50%)" }),
                     }}
                   >
-                    <div className="relative w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg group-hover:bg-blue-600 transition-colors">
-                      {initials}
-                      <button
-                        onClick={() => removeFromStage(pos.student_id)}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                        title="Remove from stage"
-                      >
-                        x
-                      </button>
-                    </div>
-                    <div className="absolute bottom-full mb-1 whitespace-nowrap bg-gray-900 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                      {pos.name}
-                    </div>
+                    FRONT
                   </div>
-                );
-              })}
+
+                  {selectedSubpartId && subparts.length > 0 && activePositions.length === 0 && (
+                    <div className="absolute top-8 left-0 right-0 text-center text-2xl font-bold text-gray-500">
+                      {activeSubpart?.title || "Subpart"}
+                    </div>
+                  )}
+
+                  {/* Grid Cells */}
+                  {Array.from({ length: GRID_ROWS }).map((_, y) =>
+                    Array.from({ length: GRID_COLS }).map((_, x) => (
+                      <div
+                        key={`${x}-${y}`}
+                        onDrop={(e) => handleGridDrop(e, x, y)}
+                        onDragOver={handleGridDragOver}
+                        className="absolute cursor-cell hover:bg-blue-100 hover:bg-opacity-30 transition-colors"
+                        style={{
+                          left: x * CELL_SIZE,
+                          top: y * CELL_SIZE,
+                          width: CELL_SIZE,
+                          height: CELL_SIZE,
+                        }}
+                      />
+                    ))
+                  )}
+
+                  {/* Positioned Students */}
+                  {activePositions.map((pos, idx) => {
+                    const initials = generateInitials(pos.name, activePositions.map((p) => p.name));
+                    const orderIndex = orderIndexByStudentId[pos.student_id];
+                    return (
+                      <div
+                        key={pos.id || `${pos.student_id}-${pos.x}-${pos.y}-${idx}`}
+                        draggable
+                        onDragStart={() => handleDragStart(pos.student_id, true)}
+                        className="absolute flex items-center justify-center group cursor-move"
+                        style={{
+                          left: toDisplayX(pos.x) * CELL_SIZE,
+                          top: toDisplayY(pos.y) * CELL_SIZE,
+                          width: CELL_SIZE,
+                          height: CELL_SIZE,
+                        }}
+                      >
+                        <div className="relative w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg group-hover:bg-blue-600 transition-colors">
+                          {initials}
+                          {orderIndex ? (
+                            <div className="absolute -top-2 -left-2 w-5 h-5 rounded-full bg-amber-500 text-[10px] font-bold text-white flex items-center justify-center shadow">
+                              {orderIndex}
+                            </div>
+                          ) : null}
+                          <button
+                            onClick={() => removeFromStage(pos.student_id)}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                            title="Remove from stage"
+                          >
+                            x
+                          </button>
+                        </div>
+                        <div className="absolute bottom-full mb-1 whitespace-nowrap bg-gray-900 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                          {pos.name}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               {subparts.length > 0 && canPosition && (
                 <button

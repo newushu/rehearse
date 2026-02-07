@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LocationAutocompleteInput } from "@/components/LocationAutocompleteInput";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draftStorage";
-import { getCallTimeFromDateTimeLocal } from "@/lib/datetime";
+import { DEFAULT_TIMEZONE, getCallTimeFromDateTimeLocal } from "@/lib/datetime";
 
 interface PerformanceFormProps {
   onSubmit: (entries: Array<{
@@ -184,7 +184,7 @@ export function PerformanceForm({ onSubmit, isLoading = false }: PerformanceForm
 
       {draftRestored && (
         <div className="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-2 rounded text-sm">
-          Draft restored from this browser. {draftSavedAt ? `Last saved ${new Date(draftSavedAt).toLocaleString()}.` : ""}
+          Draft restored from this browser. {draftSavedAt ? `Last saved ${new Date(draftSavedAt).toLocaleString(undefined, { timeZone: DEFAULT_TIMEZONE, timeZoneName: "short" })}.` : ""}
         </div>
       )}
 

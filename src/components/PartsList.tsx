@@ -14,6 +14,7 @@ interface PartsListProps {
   enableDrag?: boolean;
   showPositionedNames?: boolean;
   compact?: boolean;
+  showDelete?: boolean;
 }
 
 export function PartsList({
@@ -27,6 +28,7 @@ export function PartsList({
   enableDrag = true,
   showPositionedNames = true,
   compact = false,
+  showDelete = false,
 }: PartsListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -95,6 +97,17 @@ export function PartsList({
     if (!Number.isFinite(total)) return "--:--";
     const mins = Math.floor(total / 60);
     const secs = Math.floor(total % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatDuration = (start: any, end: any) => {
+    if (start === null || start === undefined || end === null || end === undefined) return "";
+    const startNum = Number(start);
+    const endNum = Number(end);
+    if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) return "";
+    const total = Math.max(0, Math.floor(endNum - startNum));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
@@ -285,7 +298,13 @@ export function PartsList({
         console.error("API Error:", errorData);
         throw new Error(errorData.details || "Failed to update part");
       }
-      
+
+      const updated = await res.json();
+      if (updated && onReorder) {
+        onReorder(
+          parts.map((part) => (part.id === partId ? { ...part, ...updated } : part))
+        );
+      }
       setEditingId(null);
     } catch (error) {
       console.error("Error updating part:", error);
@@ -453,24 +472,42 @@ export function PartsList({
                   )}
                   <p className="text-xs text-gray-500 mt-1">{typeLabel}</p>
                 </div>
-                {variant === "manage" && !isCompact && (
+                {((variant === "manage" && !isCompact) || showDelete) && (
                   <div className="flex gap-2 ml-4">
-                    <button
-                      onClick={() => handleReorder(index, index - 1)}
-                      disabled={index === 0}
-                      className="px-2 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 text-sm"
-                      title="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      onClick={() => handleReorder(index, index + 1)}
-                      disabled={index === displayParts.length - 1}
-                      className="px-2 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 text-sm"
-                      title="Move down"
-                    >
-                      ↓
-                    </button>
+                    {variant === "manage" && !isCompact && (
+                      <>
+                        <button
+                          onClick={() => handleReorder(index, index - 1)}
+                          disabled={index === 0}
+                          className="px-2 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 text-sm"
+                          title="Move up"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          onClick={() => handleReorder(index, index + 1)}
+                          disabled={index === displayParts.length - 1}
+                          className="px-2 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 text-sm"
+                          title="Move down"
+                        >
+                          ↓
+                        </button>
+                      </>
+                    )}
+                    {showDelete && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm("Delete this part?")) {
+                            onDelete(part.id);
+                          }
+                        }}
+                        className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
+                        title="Delete"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -486,6 +523,16 @@ export function PartsList({
                   <span className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded">
                     Order: {part.order}
                   </span>
+                  {((part as any).timepoint_seconds !== undefined || (part as any).timepoint_end_seconds !== undefined) && (
+                    <span className="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded">
+                      {formatTime((part as any).timepoint_seconds)} - {formatTime((part as any).timepoint_end_seconds)}
+                    </span>
+                  )}
+                  {((part as any).timepoint_seconds !== undefined || (part as any).timepoint_end_seconds !== undefined) && (
+                    <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded">
+                      Duration: {formatDuration((part as any).timepoint_seconds, (part as any).timepoint_end_seconds)}
+                    </span>
+                  )}
                   {variant === "manage" && (
                     <div className="flex gap-2 ml-auto">
                       <button
@@ -512,6 +559,11 @@ export function PartsList({
                   )}
                 </div>
               )}
+              {isCompact && subpartsMap[part.id]?.length > 0 && (
+                <div className="mt-2 text-xs text-gray-600">
+                  Subparts: {subpartsMap[part.id].map((sub) => sub.title).join(", ")}
+                </div>
+              )}
               {/* Timepoint Info */}
               {!isCompact && variant === "manage" && ((part as any).timepoint_seconds !== undefined || (part as any).timepoint_end_seconds !== undefined) && (
                 <div className="bg-amber-50 p-2 rounded mb-3 text-sm">
@@ -520,6 +572,9 @@ export function PartsList({
                     {formatTime((part as any).timepoint_seconds)}
                     {" - "}
                     {formatTime((part as any).timepoint_end_seconds)}
+                  </span>
+                  <span className="ml-2 text-emerald-700">
+                    (Duration {formatDuration((part as any).timepoint_seconds, (part as any).timepoint_end_seconds)})
                   </span>
                 </div>
               )}
@@ -814,6 +869,9 @@ export function PartsList({
     </div>
   );
 }
+
+
+
 
 
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MusicPlayer } from "@/components/MusicPlayer";
 import { Part } from "@/types";
+import { DEFAULT_TIMEZONE } from "@/lib/datetime";
 
 type PartItem = Part & {
   timepoint_seconds?: number | null;
@@ -16,6 +17,7 @@ interface SubpartItem {
   title: string;
   timepoint_seconds?: number | null;
   timepoint_end_seconds?: number | null;
+  order?: number | null;
 }
 
 interface Mark {
@@ -111,6 +113,7 @@ export function MarkingPanel({ performanceId, parts, musicUrl, performanceTitle,
   const [partEndInput, setPartEndInput] = useState<Record<string, string>>({});
   const [subpartStartInput, setSubpartStartInput] = useState<Record<string, string>>({});
   const [subpartEndInput, setSubpartEndInput] = useState<Record<string, string>>({});
+  const [manualTimeInput, setManualTimeInput] = useState<Record<string, string>>({});
   const [openSubpartsPartId, setOpenSubpartsPartId] = useState<string | null>(null);
   const [manualRowCount, setManualRowCount] = useState(1);
   const [partRowOverrides, setPartRowOverrides] = useState<Record<string, number>>({});
@@ -214,7 +217,7 @@ useEffect(() => {
 
   useEffect(() => {
     if (customTitle) return;
-    const title = `${new Date().toLocaleString()} · ${performanceTitle || "Performance"}`;
+    const title = `${new Date().toLocaleString(undefined, { timeZone: DEFAULT_TIMEZONE, timeZoneName: "short" })} · ${performanceTitle || "Performance"}`;
     setSessionTitle(title);
   }, [performanceTitle, customTitle]);
 
@@ -239,10 +242,65 @@ useEffect(() => {
     }));
   };
 
+  const updateSubpartTimepoints = async (sub: SubpartItem, start: number | null, end: number | null) => {
+    const prevStart = sub.timepoint_seconds ?? null;
+    const prevEnd = sub.timepoint_end_seconds ?? null;
+    setSubpartStartEnd(sub.id, start, end);
+    setSubpartsByPart((prev) => {
+      const next = { ...prev };
+      const updatedList = (next[sub.part_id] || []).map((item) =>
+        item.id === sub.id ? { ...item, timepoint_seconds: start, timepoint_end_seconds: end } : item
+      );
+      next[sub.part_id] = updatedList.sort((a, b) => {
+        const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
+        const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
+        if (aStart !== bStart) return aStart - bStart;
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/subparts/${sub.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          timepoint_seconds: start,
+          timepoint_end_seconds: end,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update timepoint");
+      const updated = await res.json();
+      if (updated) {
+        setSubpartsByPart((prev) => {
+          const next = { ...prev };
+          next[sub.part_id] = (next[sub.part_id] || []).map((item) =>
+            item.id === sub.id ? { ...item, ...updated } : item
+          );
+          return next;
+        });
+      }
+      window.dispatchEvent(new CustomEvent("subparts-updated", { detail: { partId: sub.part_id } }));
+    } catch (err) {
+      setSubpartStartEnd(sub.id, prevStart, prevEnd);
+      setSubpartsByPart((prev) => {
+        const next = { ...prev };
+        const updatedList = (next[sub.part_id] || []).map((item) =>
+          item.id === sub.id ? { ...item, timepoint_seconds: prevStart, timepoint_end_seconds: prevEnd } : item
+        );
+        next[sub.part_id] = updatedList;
+        return next;
+      });
+      console.error(err);
+      alert("Failed to update timepoints");
+    }
+  };
+
   const getSubpartStartEnd = (sub: SubpartItem) => {
     const override = subpartTimelineOverrides[sub.id];
-    const start = override?.start ?? sub.timepoint_seconds ?? null;
-    const end = override?.end ?? sub.timepoint_end_seconds ?? null;
+    const parent = parts.find((p) => p.id === sub.part_id);
+    const parentTimes = parent ? getPartStartEnd(parent) : { start: null, end: null };
+    const start = override?.start ?? sub.timepoint_seconds ?? parentTimes.start ?? null;
+    const end = override?.end ?? sub.timepoint_end_seconds ?? parentTimes.end ?? null;
     return { start, end };
   };
 
@@ -512,6 +570,21 @@ useEffect(() => {
     return { rows, unassigned, autoRowCount };
   }, [parts, manualRowCount, partRowOverrides, getPartStartEnd]);
 
+  const orderedPartsForList = useMemo(() => {
+    const items = [...parts];
+    return items.sort((a, b) => {
+      const aStart = getPartStartEnd(a).start;
+      const bStart = getPartStartEnd(b).start;
+      if (typeof aStart === "number" && typeof bStart === "number") {
+        if (aStart !== bStart) return aStart - bStart;
+        return (a.order || 0) - (b.order || 0);
+      }
+      if (typeof aStart === "number") return -1;
+      if (typeof bStart === "number") return 1;
+      return (a.order || 0) - (b.order || 0);
+    });
+  }, [parts, getPartStartEnd]);
+
   const normalizeAssignments = (rowsSnapshot: MarkRow[], raw: Record<string, AssignmentValue>) => {
     const normalized: Record<string, AssignmentValue> = {};
     Object.entries(raw || {}).forEach(([key, value]) => {
@@ -558,7 +631,7 @@ useEffect(() => {
     const prevTime = getTimeFromAssignment(prevValue);
     const displayTime = prevTime ?? existingTime;
     const label = displayTime !== null ? formatTime(displayTime) : "Unassigned";
-    const at = new Date().toLocaleString();
+    const at = new Date().toLocaleString(undefined, { timeZone: DEFAULT_TIMEZONE, timeZoneName: "short" });
     setAssignmentHistory((prev) => ({
       ...prev,
       [targetKey]: [{ prev: prevValue, label, at }, ...(prev[targetKey] || [])].slice(0, 6),
@@ -637,7 +710,7 @@ useEffect(() => {
 
     return (
       <div
-        className={`relative border border-dashed rounded px-2 py-1 text-xs flex items-center gap-2 ${
+        className={`relative border border-dashed rounded px-2 py-1 text-xs flex flex-wrap items-center gap-2 ${
           assignedMarkId ? "border-emerald-400 bg-emerald-50" : "border-gray-300 bg-white"
         }`}
         onDragOver={(e) => e.preventDefault()}
@@ -651,36 +724,56 @@ useEffect(() => {
         <span className="font-semibold text-gray-800">
           {showTime !== null ? formatTime(showTime) : "--:--"}
         </span>
+        <input
+          value={manualTimeInput[targetKey] ?? ""}
+          onChange={(e) =>
+            setManualTimeInput((prev) => ({ ...prev, [targetKey]: e.target.value }))
+          }
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            const parsed = parseTimeString(manualTimeInput[targetKey] ?? "");
+            if (parsed === null) return;
+            setAssignments((prev) => ({
+              ...prev,
+              [targetKey]: { time: parsed },
+            }));
+            setManualTimeInput((prev) => ({ ...prev, [targetKey]: "" }));
+          }}
+          placeholder="mm:ss"
+          className="px-1 py-0.5 border border-gray-200 rounded text-[10px] w-14"
+        />
         {assignedMarkId && (
-          <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white">
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white">
             Chip
           </span>
         )}
-        {history.length > 0 && (
+        <div className="ml-auto flex items-center gap-2">
+          {history.length > 0 && (
+            <button
+              onClick={() => undoAssignment(targetKey)}
+              className="text-[10px] text-gray-700 hover:text-gray-900"
+              title="Undo last change"
+            >
+              Undo
+            </button>
+          )}
           <button
-            onClick={() => undoAssignment(targetKey)}
-            className="ml-auto text-[10px] text-gray-700 hover:text-gray-900"
-            title="Undo last change"
+            onClick={() => setOpenHistoryTarget((prev) => (prev === targetKey ? null : targetKey))}
+            className="text-[10px] text-gray-500 hover:text-gray-700"
+            title="History"
           >
-            Undo
+            Log
           </button>
-        )}
-        <button
-          onClick={() => setOpenHistoryTarget((prev) => (prev === targetKey ? null : targetKey))}
-          className="text-[10px] text-gray-500 hover:text-gray-700"
-          title="History"
-        >
-          Log
-        </button>
-        {assignedMarkId && (
-          <button
-            onClick={() => clearAssignment(targetKey)}
-            className="ml-auto text-red-600 hover:text-red-800"
-            title="Remove"
-          >
-            x
-          </button>
-        )}
+          {assignedMarkId && (
+            <button
+              onClick={() => clearAssignment(targetKey)}
+              className="text-red-600 hover:text-red-800"
+              title="Remove"
+            >
+              x
+            </button>
+          )}
+        </div>
         {openHistoryTarget === targetKey && (
           <div className="absolute right-0 top-full mt-1 w-44 rounded border border-gray-200 bg-white shadow-lg p-2 text-[10px] text-gray-600 z-20">
             {history.length === 0 && <div>No history yet</div>}
@@ -931,6 +1024,12 @@ useEffect(() => {
                     const width = ((item.end - item.start) / timelineLength) * 100;
                     const part = parts.find((p) => p.id === item.id);
                     const subparts = part ? subpartsByPart[part.id] || [] : [];
+                    const orderedSubparts = [...subparts].sort((a, b) => {
+                      const aStart = getSubpartStartEnd(a).start ?? Number.POSITIVE_INFINITY;
+                      const bStart = getSubpartStartEnd(b).start ?? Number.POSITIVE_INFINITY;
+                      if (aStart !== bStart) return aStart - bStart;
+                      return a.title.localeCompare(b.title);
+                    });
                     const partColor = partColorClasses[item.id] || "bg-white border-gray-300 text-gray-900";
                     const { start, end } = part ? getPartStartEnd(part) : { start: null, end: null };
                     return (
@@ -981,9 +1080,14 @@ useEffect(() => {
                             <input
                               className="ml-1 w-12 bg-transparent"
                               value={partStartInput[item.id] ?? (start !== null ? formatTime(start) : "")}
-                              onChange={(e) =>
-                                setPartStartInput((prev) => ({ ...prev, [item.id]: e.target.value }))
-                              }
+                              onChange={(e) => {
+                                const nextValue = e.target.value;
+                                setPartStartInput((prev) => ({ ...prev, [item.id]: nextValue }));
+                                const parsed = parseTimeString(nextValue);
+                                if (parsed === null) return;
+                                if (end !== null && parsed > end) return;
+                                setPartStartEnd(item.id, parsed, end);
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key !== "Enter") return;
                                 const value = parseTimeString(partStartInput[item.id] ?? "");
@@ -1012,9 +1116,14 @@ useEffect(() => {
                             <input
                               className="ml-1 w-12 bg-transparent"
                               value={partEndInput[item.id] ?? (end !== null ? formatTime(end) : "")}
-                              onChange={(e) =>
-                                setPartEndInput((prev) => ({ ...prev, [item.id]: e.target.value }))
-                              }
+                              onChange={(e) => {
+                                const nextValue = e.target.value;
+                                setPartEndInput((prev) => ({ ...prev, [item.id]: nextValue }));
+                                const parsed = parseTimeString(nextValue);
+                                if (parsed === null) return;
+                                if (start !== null && parsed < start) return;
+                                setPartStartEnd(item.id, start, parsed);
+                              }}
                               onKeyDown={(e) => {
                                 if (e.key !== "Enter") return;
                                 const value = parseTimeString(partEndInput[item.id] ?? "");
@@ -1029,7 +1138,7 @@ useEffect(() => {
                         {subparts.length > 0 && (
                           <div className="mt-2">
                             <div className="flex flex-wrap gap-1">
-                              {subparts.map((sub) => (
+                              {orderedSubparts.map((sub) => (
                                 <span
                                   key={sub.id}
                                   className="px-2 py-0.5 rounded-full bg-white/80 text-[10px] border border-gray-200"
@@ -1050,12 +1159,19 @@ useEffect(() => {
                           </div>
                         )}
                         {openSubpartsPartId === item.id && (
-                          <div className="absolute left-0 top-full mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-20">
-                            <div className="text-xs font-semibold text-gray-800 mb-2">
+                          <div className="absolute left-0 top-full mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3 z-20 relative">
+                            <button
+                              onClick={() => setOpenSubpartsPartId(null)}
+                              className="absolute top-2 right-2 w-6 h-6 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center text-sm"
+                              aria-label="Close subparts"
+                            >
+                              ×
+                            </button>
+                            <div className="text-xs font-semibold text-gray-800 mb-2 pr-6">
                               Subparts for {item.name}
                             </div>
                             <div className="space-y-2">
-                              {subparts.map((sub) => {
+                              {orderedSubparts.map((sub) => {
                                 const subTimes = getSubpartStartEnd(sub);
                                 return (
                                   <div key={sub.id} className="flex items-center gap-2 text-xs">
@@ -1073,7 +1189,7 @@ useEffect(() => {
                                             const value = parseTimeString(subpartStartInput[sub.id] ?? "");
                                             if (value === null) return;
                                             if (subTimes.end !== null && value > subTimes.end) return;
-                                            setSubpartStartEnd(sub.id, value, subTimes.end);
+                                            updateSubpartTimepoints(sub, value, subTimes.end);
                                             setSubpartStartInput((prev) => ({ ...prev, [sub.id]: "" }));
                                           }}
                                         />
@@ -1088,7 +1204,7 @@ useEffect(() => {
                                             const value = parseTimeString(subpartEndInput[sub.id] ?? "");
                                             if (value === null) return;
                                             if (subTimes.start !== null && value < subTimes.start) return;
-                                            setSubpartStartEnd(sub.id, subTimes.start, value);
+                                            updateSubpartTimepoints(sub, subTimes.start, value);
                                             setSubpartEndInput((prev) => ({ ...prev, [sub.id]: "" }));
                                           }}
                                         />
@@ -1147,8 +1263,8 @@ useEffect(() => {
           <div className="text-xs text-gray-500 mb-4">
             Drop time chips onto Start/End. Only dropped chips change timepoints when saved.
           </div>
-          <div className="space-y-4">
-            {parts.map((part) => (
+          <div className="max-h-[70vh] overflow-y-auto pr-2 space-y-4">
+            {orderedPartsForList.map((part) => (
               <div key={part.id} className="border border-gray-200 rounded-lg p-3">
                 <div className="font-semibold text-gray-900 mb-2">{part.name}</div>
                 <div className="grid grid-cols-2 gap-2 mb-2">
@@ -1157,7 +1273,12 @@ useEffect(() => {
                 </div>
                 {(subpartsByPart[part.id] || []).length > 0 && (
                   <div className="mt-2 space-y-2">
-                    {(subpartsByPart[part.id] || []).map((sub) => (
+                    {([...subpartsByPart[part.id]]).sort((a, b) => {
+                      const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
+                      const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
+                      if (aStart !== bStart) return aStart - bStart;
+                      return (a.order ?? 0) - (b.order ?? 0);
+                    }).map((sub) => (
                       <div key={sub.id} className="border border-gray-100 rounded p-2 bg-gray-50">
                         <div className="text-sm font-semibold text-gray-800">{sub.title}</div>
                         <div className="grid grid-cols-2 gap-2 mt-2">
@@ -1192,7 +1313,12 @@ useEffect(() => {
                         const created = await res.json();
                         setSubpartsByPart((prev) => ({
                           ...prev,
-                          [part.id]: [...(prev[part.id] || []), created],
+                          [part.id]: [...(prev[part.id] || []), created].sort((a, b) => {
+                            const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
+                            const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
+                            if (aStart !== bStart) return aStart - bStart;
+                            return (a.order ?? 0) - (b.order ?? 0);
+                          }),
                         }));
                         setNewSubpartTitle((prev) => ({ ...prev, [part.id]: "" }));
                       }
@@ -1269,7 +1395,7 @@ useEffect(() => {
               <option value="">Load saved session...</option>
               {sessionList.map((sess) => (
                 <option key={sess.id} value={sess.id}>
-                  {sess.title || "Untitled"} ï¿½ {performanceNameMap[sess.performance_id] || "Performance"} ï¿½ {new Date(sess.created_at).toLocaleString()}
+                  {sess.title || "Untitled"} ï¿½ {performanceNameMap[sess.performance_id] || "Performance"} ï¿½ {new Date(sess.created_at).toLocaleString(undefined, { timeZone: DEFAULT_TIMEZONE, timeZoneName: "short" })}
                 </option>
               ))}
             </select>

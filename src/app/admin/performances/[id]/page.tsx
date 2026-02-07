@@ -18,14 +18,15 @@ import { AppBrand } from "@/components/AppBrand";
 import { SubpartsPanel } from "@/components/SubpartsPanel";
 import { AdminSignOutButton } from "@/components/AdminSignOutButton";
 import { LocationAutocompleteInput } from "@/components/LocationAutocompleteInput";
+import { DEFAULT_TIMEZONE } from "@/lib/datetime";
 import { MarkingPanel } from "@/components/MarkingPanel";
+import { PerformanceUniformsPanel } from "@/components/PerformanceUniformsPanel";
 import { loadDraft, saveDraft } from "@/lib/draftStorage";
 import {
   formatDateTimeLocalInTimeZone,
   formatDisplayDateTime,
   getCallTimeFromDateTimeLocal,
   isCallTimeLocked,
-  zonedDateTimeLocalToUtcIso,
 } from "@/lib/datetime";
 
 interface PageProps {
@@ -53,7 +54,9 @@ export default function PerformanceDetailPage({ params }: PageProps) {
   }>(infoDraftKey);
   const [performance, setPerformance] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rehearsals" | "parts" | "positioning" | "music" | "info" | "marking">("rehearsals");
+  const [activeTab, setActiveTab] = useState<
+    "rehearsals" | "parts" | "positioning" | "music" | "info" | "marking" | "uniforms"
+  >("rehearsals");
   const [showRehearsalForm, setShowRehearsalForm] = useState(false);
   const [showPartForm, setShowPartForm] = useState(false);
   const [selectedPartForPositioning, setSelectedPartForPositioning] = useState<string | null>(null);
@@ -320,6 +323,16 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                 Marking
               </button>
               <button
+                onClick={() => setActiveTab("uniforms")}
+                className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+                  activeTab === "uniforms"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-900 hover:bg-gray-50"
+                }`}
+              >
+                Uniforms
+              </button>
+              <button
                 onClick={() => setActiveTab("info")}
                 className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
                   activeTab === "info"
@@ -347,6 +360,8 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                         partId={selectedPartForPositioning}
                         partName={parts.find((p: any) => p.id === selectedPartForPositioning)?.name}
                         partDescription={parts.find((p: any) => p.id === selectedPartForPositioning)?.description}
+                        partTimepointSeconds={parts.find((p: any) => p.id === selectedPartForPositioning)?.timepoint_seconds ?? null}
+                        partTimepointEndSeconds={parts.find((p: any) => p.id === selectedPartForPositioning)?.timepoint_end_seconds ?? null}
                         isGroup={parts.find((p: any) => p.id === selectedPartForPositioning)?.is_group !== false}
                         onSavePositions={async (positions) => {
                           const payload = positions.map((p) => ({
@@ -494,6 +509,9 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                     onPartsUpdated={(updated) => setParts(updated)}
                   />
                 )}
+                {activeTab === "uniforms" && (
+                  <PerformanceUniformsPanel performanceId={id} />
+                )}
                 {activeTab === "info" && (
                   <div className="space-y-6">
                     <div className="bg-white p-6 rounded-lg border border-gray-200">
@@ -505,7 +523,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                       )}
                       {infoDraftSavedAt && (
                         <div className="text-xs text-gray-500 mb-3">
-                          Draft saved {new Date(infoDraftSavedAt).toLocaleString()}.
+                          Draft saved {new Date(infoDraftSavedAt).toLocaleString(undefined, { timeZone: DEFAULT_TIMEZONE, timeZoneName: "short" })}.
                         </div>
                       )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -765,9 +783,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({
                                   title: infoForm.title,
-                                  date: infoForm.date
-                                    ? zonedDateTimeLocalToUtcIso(infoForm.date, infoForm.timezone)
-                                    : null,
+                                  date: infoForm.date || null,
                                   call_time: infoForm.call_time,
                                   timezone: infoForm.timezone,
                                   location: infoForm.location,
@@ -831,6 +847,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
                   variant="select"
                   enableDrag
                   showPositionedNames
+                  showDelete
                 />
               </div>
               <SubpartsPanel partId={selectedPartForPositioning} />
@@ -946,7 +963,7 @@ function PartsTabContent({
       <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
         <h3 className="text-lg font-bold text-blue-900 mb-2">Copy Parts from Another Performance</h3>
         <p className="text-sm text-blue-800 mb-3">
-          This copies part names/descriptions (and optionally music timepoints). It does not copy grid positions or subparts.
+          This copies part names/descriptions (and optionally music timepoints), plus stage positions, subparts, and assigned order.
         </p>
         <div className="flex flex-wrap gap-3 items-center">
           <select

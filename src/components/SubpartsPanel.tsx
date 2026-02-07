@@ -81,6 +81,17 @@ export function SubpartsPanel({ partId }: SubpartsPanelProps) {
     fetchSubparts();
   }, [fetchSubparts]);
 
+  useEffect(() => {
+    const handleUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { partId?: string } | undefined;
+      if (!detail?.partId || detail.partId === partId) {
+        fetchSubparts();
+      }
+    };
+    window.addEventListener("subparts-updated", handleUpdated);
+    return () => window.removeEventListener("subparts-updated", handleUpdated);
+  }, [fetchSubparts, partId]);
+
   if (!partId) {
     return null;
   }
@@ -173,8 +184,14 @@ export function SubpartsPanel({ partId }: SubpartsPanelProps) {
                           }),
                         });
                         if (!res.ok) throw new Error("Failed to update subpart");
+                        const updated = await res.json();
+                        if (updated) {
+                          setSubparts((prev) =>
+                            prev.map((item) => (item.id === sub.id ? { ...item, ...updated } : item))
+                          );
+                          window.dispatchEvent(new CustomEvent("subparts-updated", { detail: { partId } }));
+                        }
                         setEditingId(null);
-                        await fetchSubparts();
                       } catch (err) {
                         alert(
                           err instanceof Error

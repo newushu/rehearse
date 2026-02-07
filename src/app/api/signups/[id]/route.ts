@@ -8,11 +8,11 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const { part_id, status } = await request.json();
+    const { part_id, status, assigned_uniform_item_id } = await request.json();
 
     const { data, error } = await supabase
       .from("student_signups")
-      .update({ part_id, status })
+      .update({ part_id, status, assigned_uniform_item_id })
       .eq("id", id)
       .select();
 
@@ -51,3 +51,5 @@ export async function DELETE(
     );
   }
 }
+
+

@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     if (!sourceParts || sourceParts.length === 0) {
       return NextResponse.json([], { status: 201 });
     }
+    const sourcePartIds = sourceParts.map((part: any) => part.id);
 
     const { data: targetMax, error: targetMaxError } = await supabase
       .from("parts")
@@ -57,7 +58,8 @@ export async function POST(request: NextRequest) {
 
     if (insertError) throw insertError;
 
-    return NextResponse.json(inserted || [], { status: 201 });
+    const insertedList = inserted || [];
+    return NextResponse.json(insertedList, { status: 201 });
   } catch (error) {
     console.error("Error copying parts:", error);
     const details =

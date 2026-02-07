@@ -9,10 +9,14 @@ import { LogoUpload } from "@/components/LogoUpload";
 import { AppBrand } from "@/components/AppBrand";
 import { ScheduleView } from "@/components/ScheduleView";
 import { AdminSignOutButton } from "@/components/AdminSignOutButton";
-import { zonedDateTimeLocalToUtcIso } from "@/lib/datetime";
+import { DEFAULT_TIMEZONE } from "@/lib/datetime";
+import { UniformsPanel } from "@/components/UniformsPanel";
+import { AdminRosterPanel } from "@/components/AdminRosterPanel";
 
 export default function AdminDashboard() {
-  const [activeSection, setActiveSection] = useState<"performances" | "schedule" | "branding">("performances");
+  const [activeSection, setActiveSection] = useState<
+    "performances" | "schedule" | "branding" | "uniforms" | "roster"
+  >("performances");
   const [showForm, setShowForm] = useState(false);
   const { performances, loading, createPerformance, deletePerformance } = usePerformances();
 
@@ -29,10 +33,10 @@ export default function AdminDashboard() {
       const created = await createPerformance(
         entry.title,
         entry.description,
-        entry.date ? zonedDateTimeLocalToUtcIso(entry.date, entry.timezone || "America/New_York") : entry.date,
+        entry.date,
         entry.location,
         entry.call_time,
-        entry.timezone || "America/New_York"
+        entry.timezone || DEFAULT_TIMEZONE
       );
 
       const rehearsals = (entry.rehearsals || []).filter(
@@ -114,6 +118,26 @@ export default function AdminDashboard() {
           >
             Branding
           </button>
+          <button
+            onClick={() => setActiveSection("uniforms")}
+            className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+              activeSection === "uniforms"
+                ? "bg-blue-600 text-white"
+                : "bg-white text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            Uniforms
+          </button>
+          <button
+            onClick={() => setActiveSection("roster")}
+            className={`px-6 py-3 rounded-lg font-semibold transition-colors ${
+              activeSection === "roster"
+                ? "bg-blue-600 text-white"
+                : "bg-white text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            Full Roster
+          </button>
         </div>
 
         {/* Content Sections */}
@@ -137,6 +161,17 @@ export default function AdminDashboard() {
               <div className="max-w-md">
                 <LogoUpload />
               </div>
+            </div>
+          )}
+          {activeSection === "uniforms" && (
+            <div className="space-y-4">
+              <h2 className="text-2xl font-bold text-gray-900">Uniforms</h2>
+              <UniformsPanel />
+            </div>
+          )}
+          {activeSection === "roster" && (
+            <div className="space-y-4">
+              <AdminRosterPanel />
             </div>
           )}
         </div>
