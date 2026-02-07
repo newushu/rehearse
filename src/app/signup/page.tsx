@@ -570,6 +570,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
   const [assignedSubpartLabel, setAssignedSubpartLabel] = useState<string | null>(null);
   const [assignedPartNote, setAssignedPartNote] = useState<string | null>(null);
   const [assignedSubpartNote, setAssignedSubpartNote] = useState<string | null>(null);
+  const [uniformNote, setUniformNote] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const musicUrl = signup.performance?.music_file_path
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/performance-music/${signup.performance.music_file_path}`
@@ -613,6 +614,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
       setAssignedSubpartLabel(null);
       setAssignedPartNote(null);
       setAssignedSubpartNote(null);
+      setUniformNote(null);
       // Get all parts for this performance
       const perfRes = await fetch(`/api/performances/${signup.performance_id}`);
       const perf = await perfRes.json();
@@ -675,6 +677,42 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
       }
       setAssignedTimeLabel(timeLabel);
       setAssignedSubpartLabel(subpartLabel);
+
+      if (signup.assigned_uniform_item_id) {
+        try {
+          const [itemsRes, typesRes] = await Promise.all([
+            fetch("/api/uniform-items"),
+            fetch("/api/uniform-types"),
+          ]);
+          const items = await itemsRes.json();
+          const types = await typesRes.json();
+          const typeMap = new Map(
+            (Array.isArray(types) ? types : []).map((t: any) => [t.id, t.name])
+          );
+          const item = (Array.isArray(items) ? items : []).find(
+            (entry: any) => entry.id === signup.assigned_uniform_item_id
+          );
+          if (item) {
+            const itemType = typeMap.get(item.uniform_type_id) || "Uniform";
+            const perfAssignments = (item.uniform_assignments || []).filter(
+              (assignment: any) => assignment.performance_id === signup.performance_id
+            );
+            const latest = perfAssignments
+              .slice()
+              .sort((a: any, b: any) => {
+                const aTime = new Date(a.distributed_at || a.returned_at || 0).getTime();
+                const bTime = new Date(b.distributed_at || b.returned_at || 0).getTime();
+                return bTime - aTime;
+              })[0];
+            let status = "Assigned";
+            if (latest?.returned_at) status = "Returned";
+            else if (latest?.distributed_at) status = "Distributed";
+            setUniformNote(`${itemType} #${item.item_number} (${status})`);
+          }
+        } catch (err) {
+          console.warn("Failed to load uniform info:", err);
+        }
+      }
 
       const resolveSubpartTimeForStudent = async (partId: string) => {
         try {
@@ -860,6 +898,12 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                   )}
                 </div>
               )}
+            </div>
+          )}
+          {uniformNote && (
+            <div className="mb-4 pb-4 border-b border-green-200">
+              <span className="font-semibold text-gray-700">Uniform:</span>{" "}
+              <span className="text-gray-600 font-medium">{uniformNote}</span>
             </div>
           )}
 

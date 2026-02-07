@@ -220,6 +220,12 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
           !assignment.returned_at
       );
       if (!existing) {
+        const activeList = getActiveAssignments(item);
+        const distributedMatch = activeList.find(
+          (assignment) =>
+            assignment.student_id === row.student_id && Boolean(assignment.distributed_at)
+        );
+        const inheritedDistributedAt = distributedMatch?.distributed_at || null;
         const assignRes = await fetch("/api/uniform-assignments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -228,12 +234,28 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
             student_id: row.student_id,
             student_name: row.name,
             performance_id: performanceId,
-            distributed_at: null,
+            distributed_at: inheritedDistributedAt,
           }),
         });
         if (!assignRes.ok) {
           const data = await assignRes.json().catch(() => ({}));
           if (data?.error) alert(data.error);
+        }
+      } else if (!existing.distributed_at) {
+        const activeList = getActiveAssignments(item);
+        const distributedMatch = activeList.find(
+          (assignment) =>
+            assignment.student_id === row.student_id && Boolean(assignment.distributed_at)
+        );
+        if (distributedMatch?.distributed_at) {
+          await fetch(`/api/uniform-assignments/${existing.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              distributed_at: distributedMatch.distributed_at,
+              returned_at: null,
+            }),
+          });
         }
       }
     }
@@ -384,7 +406,13 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
             activeAny.student_id &&
             activeAny.student_id !== row.student_id
           );
-          const isGiven = Boolean(activePerf && activePerf.distributed_at);
+          const activeAssignments = getActiveAssignments(assignedItem);
+          const distributedMatch = activeAssignments.find(
+            (assignment) =>
+              assignment.student_id === row.student_id && Boolean(assignment.distributed_at)
+          );
+          const inheritedDistributedAt = distributedMatch?.distributed_at || null;
+          const isGiven = Boolean(activePerf && activePerf.distributed_at) || Boolean(inheritedDistributedAt);
           const isReturned = Boolean(latestPerf && latestPerf.returned_at);
           const isAssignedOnly = Boolean(assignedItem && !isGiven && !isReturned);
           const chipColor = !assignedItem
@@ -406,7 +434,7 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
             : isReturned
               ? `Returned ${formatDisplayDateTime(latestPerf!.returned_at as string, DEFAULT_TIMEZONE)}`
               : isGiven
-                ? `Given ${formatDisplayDateTime(activePerf!.distributed_at as string, DEFAULT_TIMEZONE)}`
+                ? `Given ${formatDisplayDateTime((activePerf?.distributed_at || inheritedDistributedAt) as string, DEFAULT_TIMEZONE)}`
                 : isAssignedOnly
                   ? "Assigned"
                   : null;
