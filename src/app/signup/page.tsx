@@ -256,7 +256,7 @@ return (
                   <div>
                     <div className="text-sm text-gray-500">Performance Date</div>
                     <div className="font-semibold text-gray-900">
-                      {formatDisplayDateTime(
+                      {formatDisplayDateTimeWithWeekday(
                         performanceDetails.date,
                         performanceDetails.timezone || "America/New_York"
                       )}
@@ -306,7 +306,7 @@ return (
                               }`}
                             >
                               {reh.date
-                                ? formatDisplayDateTime(
+                                ? formatDisplayDateTimeWithWeekday(
                                     reh.date,
                                     performanceDetails.timezone || "America/New_York"
                                   )
@@ -744,7 +744,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
               const next = upcoming[0];
               const title = next.perfInfo?.title || "Performance";
               const dateLabel = next.perfInfo?.date
-                ? formatDisplayDateTime(
+                ? formatDisplayDateTimeWithWeekday(
                     next.perfInfo.date,
                     signup.performance?.timezone || "America/New_York"
                   )
@@ -855,7 +855,16 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     } finally {
       setLoadingPos(false);
     }
-  }, [signup.performance_id, signup.student_id]);
+  }, [
+    formatTimeRange,
+    signup.assigned_uniform_item_id,
+    signup.part_id,
+    signup.performance?.date,
+    signup.performance?.timezone,
+    signup.performance_id,
+    signup.student_id,
+    studentName,
+  ]);
 
   useEffect(() => {
     fetchPositioning();
@@ -901,7 +910,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             </h3>
             <div className="text-sm text-gray-600 mt-2">
               <div>📅 Date: {signup.performance?.date
-                ? formatDisplayDateTime(signup.performance.date, signup.performance.timezone || "America/New_York")
+                ? formatDisplayDateTimeWithWeekday(signup.performance.date, signup.performance.timezone || "America/New_York")
                 : "N/A"}</div>
               <div>📍 Location: {signup.performance?.location || "N/A"}</div>
               <div>

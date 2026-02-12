@@ -1,1 +1,208 @@
-{"version":3,"caseSensitive":false,"basePath":"","rewrites":{"beforeFiles":[],"afterFiles":[],"fallback":[]},"redirects":[{"source":"/:path+/","destination":"/:path+","permanent":true,"internal":true,"regex":"^(?:\\/((?:[^\\/]+?)(?:\\/(?:[^\\/]+?))*))\\/$"}],"headers":[]}
+{
+  "version": 3,
+  "pages404": true,
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/admin/performances/[id]",
+      "regex": "^/admin/performances/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/admin/performances/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/equipment/[id]",
+      "regex": "^/api/equipment/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/equipment/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/marking-sessions/[id]",
+      "regex": "^/api/marking\\-sessions/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/marking\\-sessions/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/parts/[id]",
+      "regex": "^/api/parts/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/parts/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/performance-contacts/[id]",
+      "regex": "^/api/performance\\-contacts/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/performance\\-contacts/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/performances/[id]",
+      "regex": "^/api/performances/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/performances/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/performances/[id]/roster",
+      "regex": "^/api/performances/([^/]+?)/roster(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/performances/(?<nxtPid>[^/]+?)/roster(?:/)?$"
+    },
+    {
+      "page": "/api/performances/[id]/upload-music",
+      "regex": "^/api/performances/([^/]+?)/upload\\-music(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/performances/(?<nxtPid>[^/]+?)/upload\\-music(?:/)?$"
+    },
+    {
+      "page": "/api/rehearsals/[id]",
+      "regex": "^/api/rehearsals/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/rehearsals/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/signups/[id]",
+      "regex": "^/api/signups/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/signups/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/solo-assignments/[id]",
+      "regex": "^/api/solo\\-assignments/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/solo\\-assignments/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/stage-positions/[id]",
+      "regex": "^/api/stage\\-positions/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/stage\\-positions/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/students/[id]",
+      "regex": "^/api/students/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/students/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/subparts/[id]",
+      "regex": "^/api/subparts/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/subparts/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/uniform-assignments/[id]",
+      "regex": "^/api/uniform\\-assignments/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/uniform\\-assignments/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/uniform-items/[id]",
+      "regex": "^/api/uniform\\-items/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/uniform\\-items/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/uniform-types/[id]",
+      "regex": "^/api/uniform\\-types/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/uniform\\-types/(?<nxtPid>[^/]+?)(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/admin",
+      "regex": "^/admin(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/admin(?:/)?$"
+    },
+    {
+      "page": "/admin/setup",
+      "regex": "^/admin/setup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/admin/setup(?:/)?$"
+    },
+    {
+      "page": "/signup",
+      "regex": "^/signup(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/signup(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSuffix": ".prefetch.rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments"
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}
