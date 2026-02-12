@@ -23,6 +23,8 @@ type Student = { id: string; name: string };
 type Performance = { id: string; title: string };
 
 export function UniformsPanel() {
+  const formatIfDate = (value: string | null) =>
+    value ? formatDisplayDateTime(value, DEFAULT_TIMEZONE) : "—";
   const [types, setTypes] = useState<UniformType[]>([]);
   const [items, setItems] = useState<UniformItem[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -715,9 +717,7 @@ export function UniformsPanel() {
                         </div>
                         <div className="text-xs text-gray-500">
                           Distributed:{" "}
-                          {assignment.distributed_at
-                            ? formatDisplayDateTime(assignment.distributed_at as string, DEFAULT_TIMEZONE)
-                            : "—"}
+                          {formatIfDate(assignment.distributed_at)}
                         </div>
                         {assignment.performance_id && (
                           <div className="text-xs text-gray-500">
@@ -819,9 +819,7 @@ export function UniformsPanel() {
                         </div>
                         <div className="text-xs text-gray-500">
                         Distributed:{" "}
-                        {assignment.distributed_at
-                          ? formatDisplayDateTime(assignment.distributed_at as string, DEFAULT_TIMEZONE)
-                          : "—"}
+                        {formatIfDate(assignment.distributed_at)}
                         </div>
                         {assignment.performance_id && (
                           <div className="text-xs text-gray-500">

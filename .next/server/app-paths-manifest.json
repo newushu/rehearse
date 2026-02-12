@@ -1,17 +1,4 @@
 {
-  "/api/rehearsals/route": "app/api/rehearsals/route.js",
-  "/api/parts/route": "app/api/parts/route.js",
-  "/api/performances/route": "app/api/performances/route.js",
-  "/api/performances/[id]/route": "app/api/performances/[id]/route.js",
-  "/api/performance-contacts/route": "app/api/performance-contacts/route.js",
-  "/api/performance-contacts/all/route": "app/api/performance-contacts/all/route.js",
-  "/api/app-logo/route": "app/api/app-logo/route.js",
-  "/api/rehearsal-attendance/route": "app/api/rehearsal-attendance/route.js",
-  "/api/performances/[id]/roster/route": "app/api/performances/[id]/roster/route.js",
-  "/api/uniform-types/route": "app/api/uniform-types/route.js",
-  "/api/uniform-items/route": "app/api/uniform-items/route.js",
-  "/signup/page": "app/signup/page.js",
-  "/page": "app/page.js",
   "/admin/page": "app/admin/page.js",
   "/admin/performances/[id]/page": "app/admin/performances/[id]/page.js"
 }

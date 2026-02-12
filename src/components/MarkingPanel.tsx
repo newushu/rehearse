@@ -15,6 +15,7 @@ interface SubpartItem {
   id: string;
   part_id: string;
   title: string;
+  description?: string | null;
   timepoint_seconds?: number | null;
   timepoint_end_seconds?: number | null;
   order?: number | null;
@@ -117,6 +118,9 @@ export function MarkingPanel({ performanceId, parts, musicUrl, performanceTitle,
   const [openSubpartsPartId, setOpenSubpartsPartId] = useState<string | null>(null);
   const [manualRowCount, setManualRowCount] = useState(1);
   const [partRowOverrides, setPartRowOverrides] = useState<Record<string, number>>({});
+  const [partNoteInput, setPartNoteInput] = useState<Record<string, string>>({});
+  const [subpartNoteInput, setSubpartNoteInput] = useState<Record<string, string>>({});
+  const [newPartName, setNewPartName] = useState("");
   const [assignmentHistory, setAssignmentHistory] = useState<Record<string, Array<{ prev: AssignmentValue | undefined; label: string; at: string }>>>({});
   const [openHistoryTarget, setOpenHistoryTarget] = useState<string | null>(null);
 
@@ -241,6 +245,43 @@ useEffect(() => {
       [subpartId]: { start, end },
     }));
   };
+
+  const savePartNote = useCallback(
+    async (partId: string, note: string) => {
+      const part = parts.find((p) => p.id === partId);
+      if (!part) return;
+      if ((part.description || "") === note) return;
+      const res = await fetch(`/api/parts/${partId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: note }),
+      });
+      if (!res.ok) return;
+      const updated = await res.json();
+      onPartsUpdated(parts.map((p) => (p.id === partId ? { ...p, description: updated.description || "" } : p)));
+    },
+    [onPartsUpdated, parts]
+  );
+
+  const saveSubpartNote = useCallback(async (subpartId: string, note: string) => {
+    const sub = Object.values(subpartsByPart).flat().find((s) => s.id === subpartId);
+    if (!sub) return;
+    if ((sub.description || "") === note) return;
+    const res = await fetch(`/api/subparts/${subpartId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: note }),
+    });
+    if (!res.ok) return;
+    const updated = await res.json();
+    setSubpartsByPart((prev) => {
+      const next = { ...prev };
+      next[sub.part_id] = (next[sub.part_id] || []).map((item) =>
+        item.id === subpartId ? { ...item, description: updated.description ?? "" } : item
+      );
+      return next;
+    });
+  }, [subpartsByPart]);
 
   const updateSubpartTimepoints = async (sub: SubpartItem, start: number | null, end: number | null) => {
     const prevStart = sub.timepoint_seconds ?? null;
@@ -743,9 +784,19 @@ useEffect(() => {
           className="px-1 py-0.5 border border-gray-200 rounded text-[10px] w-14"
         />
         {assignedMarkId && (
-          <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm("Remove this chip assignment?")) {
+                clearAssignment(targetKey);
+              }
+            }}
+            className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white"
+            title="Remove assignment"
+          >
             Chip
-          </span>
+          </button>
         )}
         <div className="ml-auto flex items-center gap-2">
           {history.length > 0 && (
@@ -1263,6 +1314,40 @@ useEffect(() => {
           <div className="text-xs text-gray-500 mb-4">
             Drop time chips onto Start/End. Only dropped chips change timepoints when saved.
           </div>
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              type="text"
+              value={newPartName}
+              onChange={(e) => setNewPartName(e.target.value)}
+              placeholder="Add part"
+              className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+            />
+            <button
+              onClick={async () => {
+                const name = newPartName.trim();
+                if (!name) return;
+                const nextOrder = (parts?.length || 0) + 1;
+                const res = await fetch("/api/parts", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    performance_id: performanceId,
+                    name,
+                    description: "",
+                    order: nextOrder,
+                  }),
+                });
+                if (res.ok) {
+                  const created = await res.json();
+                  onPartsUpdated([...(parts || []), created]);
+                  setNewPartName("");
+                }
+              }}
+              className="px-2 py-1 bg-gray-900 text-white rounded text-xs"
+            >
+              Add
+            </button>
+          </div>
           <div className="max-h-[70vh] overflow-y-auto pr-2 space-y-4">
             {orderedPartsForList.map((part) => (
               <div key={part.id} className="border border-gray-200 rounded-lg p-3">
@@ -1271,6 +1356,17 @@ useEffect(() => {
                   {renderTimeTarget("part", part.id, "start")}
                   {renderTimeTarget("part", part.id, "end")}
                 </div>
+                <input
+                  value={partNoteInput[part.id] ?? part.description ?? ""}
+                  onChange={(e) =>
+                    setPartNoteInput((prev) => ({ ...prev, [part.id]: e.target.value }))
+                  }
+                  onBlur={() =>
+                    savePartNote(part.id, partNoteInput[part.id] ?? part.description ?? "")
+                  }
+                  placeholder="Add part note..."
+                  className="w-full px-2 py-1 border border-gray-200 rounded text-xs"
+                />
                 {(subpartsByPart[part.id] || []).length > 0 && (
                   <div className="mt-2 space-y-2">
                     {([...subpartsByPart[part.id]]).sort((a, b) => {
@@ -1285,6 +1381,17 @@ useEffect(() => {
                           {renderTimeTarget("subpart", sub.id, "start")}
                           {renderTimeTarget("subpart", sub.id, "end")}
                         </div>
+                        <input
+                          value={subpartNoteInput[sub.id] ?? sub.description ?? ""}
+                          onChange={(e) =>
+                            setSubpartNoteInput((prev) => ({ ...prev, [sub.id]: e.target.value }))
+                          }
+                          onBlur={() =>
+                            saveSubpartNote(sub.id, subpartNoteInput[sub.id] ?? sub.description ?? "")
+                          }
+                          placeholder="Add subpart note..."
+                          className="w-full px-2 py-1 border border-gray-200 rounded text-xs mt-2"
+                        />
                       </div>
                     ))}
                   </div>

@@ -62,6 +62,7 @@ export default function PerformanceDetailPage({ params }: PageProps) {
   const [selectedPartForPositioning, setSelectedPartForPositioning] = useState<string | null>(null);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [showRehearseOverlay, setShowRehearseOverlay] = useState(false);
+  const [showRoster, setShowRoster] = useState(false);
   const [exportingRehearse, setExportingRehearse] = useState(false);
   const [embedAudioExport, setEmbedAudioExport] = useState(true);
   const [infoSaving, setInfoSaving] = useState(false);
@@ -231,12 +232,23 @@ export default function PerformanceDetailPage({ params }: PageProps) {
 
       <div className="flex min-h-[calc(100vh-64px)]">
         {/* Left Sidebar - Roster */}
-        <div className="w-64 bg-white shadow-md p-6 overflow-y-auto border-r border-gray-200">
+        <div className="hidden md:block w-64 bg-white shadow-md p-6 overflow-y-auto border-r border-gray-200">
           <RosterPanel performanceId={id} />
         </div>
 
         {/* Main Content */}
         <div className="flex-1 min-w-0 p-6">
+          <div className="md:hidden mb-4 flex items-center justify-between">
+            <button
+              onClick={() => setShowRoster(true)}
+              className="px-3 py-2 bg-gray-900 text-white rounded text-sm"
+            >
+              Open Roster
+            </button>
+            <div className="text-[11px] text-gray-500">
+              Tip: Rotate your phone for a better view.
+            </div>
+          </div>
           <div className={`${activeTab === "positioning" || activeTab === "marking" ? "max-w-none mx-0" : "max-w-5xl mx-auto"}`}>
             {/* Header */}
             <div className="mb-8">
@@ -868,6 +880,28 @@ export default function PerformanceDetailPage({ params }: PageProps) {
               );
             }}
           />
+        )}
+        {showRoster && (
+          <div
+            className="fixed inset-0 z-40 bg-black/40 md:hidden"
+            onClick={() => setShowRoster(false)}
+          >
+            <div
+              className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl p-4 overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-gray-900">Roster</div>
+                <button
+                  onClick={() => setShowRoster(false)}
+                  className="text-xs text-gray-600 hover:text-gray-900"
+                >
+                  Close
+                </button>
+              </div>
+              <RosterPanel performanceId={id} />
+            </div>
+          </div>
         )}
     </div>
   );

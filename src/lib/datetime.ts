@@ -146,6 +146,37 @@ export function formatDisplayDateTime(isoValue: string, timeZone: string): strin
   });
 }
 
+export function formatDisplayDateTimeWithWeekday(isoValue: string, timeZone: string): string {
+  if (!isoValue) return "â€”";
+  if (!hasTimeZoneInfo(isoValue)) {
+    const parsed = parseNaiveDateTime(isoValue);
+    if (!parsed) return isoValue;
+    const dateUtc = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day, parsed.hour, parsed.minute, 0));
+    const label = dateUtc.toLocaleString(undefined, {
+      timeZone: "UTC",
+      weekday: "long",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${label} ET`;
+  }
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return "â€”";
+  return date.toLocaleString(undefined, {
+    timeZone: timeZone || DEFAULT_TIMEZONE,
+    weekday: "long",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
 export function formatTimeInTimeZone(isoValue: string, timeZone: string): string {
   if (!isoValue) return "—";
   if (!hasTimeZoneInfo(isoValue)) {

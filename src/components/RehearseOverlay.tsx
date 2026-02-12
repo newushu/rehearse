@@ -27,6 +27,12 @@ interface SubpartItem {
   timepoint_seconds?: number | null;
   timepoint_end_seconds?: number | null;
 }
+interface SubpartAssignment {
+  student_id: string;
+  student_name: string;
+  start_side?: string | null;
+  end_side?: string | null;
+}
 
 interface RehearseOverlayProps {
   performanceId: string;
@@ -55,8 +61,11 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
   const [loadingPositions, setLoadingPositions] = useState(false);
   const [ringEnabled, setRingEnabled] = useState(true);
   const [subpartsByPart, setSubpartsByPart] = useState<Record<string, SubpartItem[]>>({});
-  const [subpartAssignments, setSubpartAssignments] = useState<Record<string, string[]>>({});
+  const [subpartAssignments, setSubpartAssignments] = useState<Record<string, SubpartAssignment[]>>({});
+  const [partSides, setPartSides] = useState<Record<string, SubpartAssignment[]>>({});
   const [subpartHasPositions, setSubpartHasPositions] = useState<Record<string, boolean>>({});
+  const [subpartGridOpen, setSubpartGridOpen] = useState<Record<string, boolean>>({});
+  const [subpartPositionsMap, setSubpartPositionsMap] = useState<Record<string, PositionEntry[]>>({});
   const [personFilter, setPersonFilter] = useState("");
   const [notesByKey, setNotesByKey] = useState<Record<string, string>>({});
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
@@ -254,7 +263,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
       list.forEach((p) => names.add(p.student_name || "Unknown"));
     });
     Object.values(subpartAssignments).forEach((list) => {
-      list.forEach((name) => names.add(name || "Unknown"));
+      list.forEach((entry) => names.add(entry.student_name || "Unknown"));
     });
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [positionsByPart, subpartAssignments]);
@@ -265,7 +274,9 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
       const posNames = (positionsByPart[part.id] || []).map((p) => p.student_name);
       if (posNames.includes(personFilter)) return true;
       const subparts = subpartsByPart[part.id] || [];
-      return subparts.some((sub) => (subpartAssignments[sub.id] || []).includes(personFilter));
+      return subparts.some((sub) =>
+        (subpartAssignments[sub.id] || []).some((entry) => entry.student_name === personFilter)
+      );
     });
   }, [orderedParts, personFilter, positionsByPart, subpartsByPart, subpartAssignments]);
 
@@ -493,17 +504,42 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
         });
         setSubpartsByPart(subpartsMap);
 
+        const partSideEntries = await Promise.all(
+          parts.map(async (part) => {
+            const res = await fetch(`/api/part-sides?partId=${part.id}`);
+            if (!res.ok) return [part.id, []] as const;
+            const data = await res.json();
+            const entries = (data || []).map((item: any) => ({
+              student_id: item.student_id,
+              student_name: item.student_name || "Unknown",
+              start_side: item.start_side ?? null,
+              end_side: item.end_side ?? null,
+            }));
+            return [part.id, entries] as const;
+          })
+        );
+        const partSideMap: Record<string, SubpartAssignment[]> = {};
+        partSideEntries.forEach(([partId, list]) => {
+          partSideMap[partId] = list;
+        });
+        setPartSides(partSideMap);
+
         const allSubpartIds = subpartsEntries.flatMap(([, list]) => list.map((s: SubpartItem) => s.id));
         const assignmentEntries = await Promise.all(
           allSubpartIds.map(async (subpartId) => {
             const res = await fetch(`/api/subpart-order?subpartId=${subpartId}`);
             if (!res.ok) return [subpartId, []] as const;
             const data = await res.json();
-            const names = (data || []).map((item: any) => item.student_name || "Unknown");
-            return [subpartId, names] as const;
+            const entries = (data || []).map((item: any) => ({
+              student_id: item.student_id,
+              student_name: item.student_name || "Unknown",
+              start_side: item.start_side ?? null,
+              end_side: item.end_side ?? null,
+            }));
+            return [subpartId, entries] as const;
           })
         );
-        const assignmentMap: Record<string, string[]> = {};
+        const assignmentMap: Record<string, SubpartAssignment[]> = {};
         assignmentEntries.forEach(([subpartId, list]) => {
           assignmentMap[subpartId] = list;
         });
@@ -645,12 +681,12 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     if (subparts.length === 0) return null;
     const items = subparts
       .map((sub) => {
-        const names = subpartAssignments[sub.id] || [];
+        const entries = subpartAssignments[sub.id] || [];
         const hasPositions = subpartHasPositions[sub.id] || false;
-        if (names.length === 0 || hasPositions) return null;
-        return { title: sub.title, names, description: sub.description || null };
+        if (entries.length === 0 || hasPositions) return null;
+        return { title: sub.title, entries, description: sub.description || null };
       })
-      .filter(Boolean) as Array<{ title: string; names: string[]; description?: string | null }>;
+      .filter(Boolean) as Array<{ title: string; entries: SubpartAssignment[]; description?: string | null }>;
     if (items.length === 0) return null;
 
     return (
@@ -665,7 +701,66 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
               {item.description && (
                 <div className="text-sm text-gray-500">{item.description}</div>
               )}
-              <div className="text-gray-600">{item.names.join(", ")}</div>
+              <div className="text-gray-600">
+                {item.entries
+                  .map((entry) => {
+                    const start = entry.start_side || "OS";
+                    const end = entry.end_side || start;
+                    const sideLabel = start === end ? start : `${start}→${end}`;
+                    return `${entry.student_name} (${sideLabel})`;
+                  })
+                  .join(", ")}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMiniGrid = (positions: PositionEntry[]) => {
+    if (!positions || positions.length === 0) {
+      return <div className="text-[10px] text-gray-500">No positions</div>;
+    }
+    const xs = positions.map((p) => p.x);
+    const ys = positions.map((p) => p.y);
+    const minX = Math.max(0, Math.min(...xs) - 1);
+    const maxX = Math.min(GRID_COLS - 1, Math.max(...xs) + 1);
+    const minY = Math.max(0, Math.min(...ys) - 1);
+    const maxY = Math.min(GRID_ROWS - 1, Math.max(...ys) + 1);
+    const cols = Math.max(1, maxX - minX + 1);
+    const rows = Math.max(1, maxY - minY + 1);
+    const cell = 18;
+    const width = cols * cell;
+    const height = rows * cell;
+    return (
+      <div className="mt-2 border border-gray-200 bg-gray-50 p-2 rounded">
+        <div
+          className="relative"
+          style={{
+            width,
+            height,
+            backgroundImage: `
+              linear-gradient(rgba(0,0,0,.1) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(0,0,0,.1) 1px, transparent 1px)
+            `,
+            backgroundSize: `${cell}px ${cell}px`,
+          }}
+        >
+          {positions.map((pos) => (
+            <div
+              key={`${pos.student_id}-${pos.x}-${pos.y}`}
+              className="absolute flex items-center justify-center"
+              style={{
+                left: (pos.x - minX) * cell,
+                top: (pos.y - minY) * cell,
+                width: cell,
+                height: cell,
+              }}
+            >
+              <div className="bg-blue-600 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {getInitials(pos.student_name)}
+              </div>
             </div>
           ))}
         </div>
@@ -811,6 +906,7 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
       new Map(positions.map((p) => [p.student_id, p.student_name || "Unknown"])).values()
     );
     const subparts = part ? subpartsByPart[part.id] || [] : [];
+    const sideList = part ? partSides[part.id] || [] : [];
     const textSize = isNext ? "text-2xl" : "text-base";
     const infoLabelSize = isNext ? "text-sm" : "text-xs";
     const partDuration = part ? formatDuration(part.timepoint_seconds, part.timepoint_end_seconds) : "";
@@ -858,16 +954,39 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                         ) : (
                           <span>
                             Assigned:{" "}
-                            {assigned.map((name, aIdx) => (
-                              <span key={`${sub.id}-info-${aIdx}`}>
-                                {aIdx > 0 ? ", " : ""}
-                                {aIdx + 1}. {name}
-                              </span>
-                            ))}
+                            {assigned.map((entry, aIdx) => {
+                              const start = entry.start_side || "OS";
+                              const end = entry.end_side || start;
+                              const sideLabel = start === end ? start : `${start}→${end}`;
+                              return (
+                                <span key={`${sub.id}-info-${aIdx}`}>
+                                  {aIdx > 0 ? ", " : ""}
+                                  {aIdx + 1}. {entry.student_name}{" "}
+                                  <span className="font-semibold">({sideLabel})</span>
+                                </span>
+                              );
+                            })}
                           </span>
                         )}
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {subparts.length === 0 && sideList.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-600 mb-2">Sides</div>
+              <div className="text-sm text-gray-700 flex flex-wrap gap-2">
+                {sideList.map((entry) => {
+                  const start = entry.start_side || "OS";
+                  const end = entry.end_side || start;
+                  const sideLabel = start === end ? start : `${start}→${end}`;
+                  return (
+                    <span key={`side-${entry.student_id}`} className="px-2 py-1 bg-gray-100 rounded">
+                      {entry.student_name} <span className="font-semibold">({sideLabel})</span>
+                    </span>
                   );
                 })}
               </div>
@@ -1426,6 +1545,12 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                       )}
                       {isExpanded && (
                         <div className="mt-3">
+                          <div className="text-[11px] font-semibold text-gray-600 mb-1">Grid (compact)</div>
+                          {renderMiniGrid(positionsByPart[part.id] || [])}
+                        </div>
+                      )}
+                      {isExpanded && (
+                        <div className="mt-3">
                           <div className="text-[11px] font-semibold text-gray-600 mb-1">Notes</div>
                           <textarea
                             value={noteDrafts[getNoteKey(part.id)] ?? notesByKey[getNoteKey(part.id)] ?? ""}
@@ -1500,14 +1625,22 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                                   Assigned:{" "}
                                   {assigned.length === 0
                                     ? "—"
-                                    : assigned.map((name, nameIdx) => (
-                                        <span key={`${sub.id}-assigned-${nameIdx}`}>
-                                          {nameIdx > 0 ? ", " : ""}
-                                          <span className={name === personFilter ? "font-bold text-emerald-600" : ""}>
-                                            {name}
+                                    : assigned.map((entry, nameIdx) => {
+                                        const start = entry.start_side || "OS";
+                                        const end = entry.end_side || start;
+                                        const sideLabel = start === end ? start : `${start}→${end}`;
+                                        return (
+                                          <span key={`${sub.id}-assigned-${nameIdx}`}>
+                                            {nameIdx > 0 ? ", " : ""}
+                                            <span
+                                              className={entry.student_name === personFilter ? "font-bold text-emerald-600" : ""}
+                                            >
+                                              {entry.student_name}
+                                            </span>{" "}
+                                            <span className="font-semibold">({sideLabel})</span>
                                           </span>
-                                        </span>
-                                      ))}
+                                        );
+                                      })}
                                 </div>
                                 <div className="text-gray-500">
                                   Notes: {sub.description ? sub.description : "—"}
@@ -1554,6 +1687,45 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                                   >
                                     Jump to {sub.title} subpart
                                   </button>
+                                )}
+                                {subpartHasPositions[sub.id] && (
+                                  <div className="mt-2">
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        setSubpartGridOpen((prev) => ({
+                                          ...prev,
+                                          [sub.id]: !prev[sub.id],
+                                        }));
+                                        if (!subpartPositionsMap[sub.id]) {
+                                          try {
+                                            const res = await fetch(`/api/subpart-positions?subpartId=${sub.id}`);
+                                            if (res.ok) {
+                                              const data = await res.json();
+                                              const mapped = (data || []).map((p: any) => ({
+                                                student_id: p.student_id,
+                                                student_name: p.student_name || "Unknown",
+                                                x: p.x,
+                                                y: p.y,
+                                              }));
+                                              setSubpartPositionsMap((prev) => ({ ...prev, [sub.id]: mapped }));
+                                            }
+                                          } catch {
+                                            setSubpartPositionsMap((prev) => ({ ...prev, [sub.id]: [] }));
+                                          }
+                                        }
+                                      }}
+                                      className="text-[11px] text-indigo-600 hover:text-indigo-800 underline"
+                                    >
+                                      {subpartGridOpen[sub.id] ? "Hide grid" : "Show grid"}
+                                    </button>
+                                    {subpartGridOpen[sub.id] && (
+                                      <div className="mt-1">
+                                        {renderMiniGrid(subpartPositionsMap[sub.id] || [])}
+                                      </div>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             );

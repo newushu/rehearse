@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     let positionsByPart: Record<string, Array<{ student_id: string; student_name: string; x: number; y: number }>> = {};
     let subpartsByPart: Record<string, Array<{ id: string; title: string; mode?: string | null }>> = {};
     let subpartPositionsBySubpart: Record<string, Array<{ student_id: string; student_name: string; x: number; y: number }>> = {};
-    let subpartOrderBySubpart: Record<string, Array<{ student_id: string; student_name: string }>> = {};
+    let subpartOrderBySubpart: Record<string, Array<{ student_id: string; student_name: string; start_side?: string | null; end_side?: string | null }>> = {};
 
     if (partIds.length > 0) {
       const { data: positions, error: posError } = await supabase
@@ -144,6 +144,8 @@ export async function GET(request: NextRequest) {
             subpart_id,
             student_id,
             "order",
+            start_side,
+            end_side,
             students:student_id (
               id,
               name
@@ -160,6 +162,8 @@ export async function GET(request: NextRequest) {
           acc[item.subpart_id].push({
             student_id: item.student_id,
             student_name: item.students?.name || "Unknown",
+            start_side: item.start_side ?? null,
+            end_side: item.end_side ?? null,
           });
           return acc;
         }, {});
@@ -660,6 +664,13 @@ export async function GET(request: NextRequest) {
         return mins + ':' + String(secs).padStart(2, '0');
       }
 
+      function formatSide(entry) {
+        if (!entry) return '';
+        const start = entry.start_side || 'OS';
+        const end = entry.end_side || start;
+        return start === end ? start : (start + '→' + end);
+      }
+
       function playRing() {
         try {
           const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -1067,9 +1078,12 @@ export async function GET(request: NextRequest) {
                 subWrap.appendChild(meta);
               }
 
-              const subNamesList = (DATA.subpartOrderBySubpart?.[sub.id] || []).map((p) => p.student_name);
+              const subNamesList = (DATA.subpartOrderBySubpart?.[sub.id] || []).map((p) => {
+                const label = p.student_name + ' (' + formatSide(p) + ')';
+                return label;
+              });
               const subNames = subNamesList
-                .map((n) => (filterName && n === filterName ? '**' + n + '**' : n))
+                .map((n) => (filterName && n.startsWith(filterName) ? '**' + n + '**' : n))
                 .join(', ');
               if (subNames) {
                 const meta = document.createElement('div');
@@ -1148,7 +1162,9 @@ export async function GET(request: NextRequest) {
               }
 
               const subPeopleSet = new Set();
-              (DATA.subpartOrderBySubpart?.[sub.id] || []).forEach((p) => subPeopleSet.add(p.student_name || 'Unknown'));
+              (DATA.subpartOrderBySubpart?.[sub.id] || []).forEach((p) => {
+                subPeopleSet.add((p.student_name || 'Unknown') + ' (' + formatSide(p) + ')');
+              });
               const subPeople = Array.from(subPeopleSet).sort((a, b) => String(a).localeCompare(String(b)));
               const subPeopleLine = document.createElement('div');
               subPeopleLine.className = 'summary-people summary-indent-1';

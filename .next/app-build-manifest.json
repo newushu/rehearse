@@ -1,20 +1,5 @@
 {
   "pages": {
-    "/api/parts/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/parts/route.js"
-    ],
-    "/api/performances/[id]/roster/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/performances/[id]/roster/route.js"
-    ],
-    "/api/subparts/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/subparts/route.js"
-    ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -26,60 +11,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/page.js"
     ],
-    "/signup/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/signup/page.js"
-    ],
     "/api/app-logo/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/api/app-logo/route.js"
-    ],
-    "/api/performances/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/performances/route.js"
-    ],
-    "/api/students/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/students/route.js"
-    ],
-    "/api/signups/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/signups/route.js"
-    ],
-    "/api/performances/[id]/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/performances/[id]/route.js"
-    ],
-    "/api/rehearse-notes/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/rehearse-notes/route.js"
-    ],
-    "/api/stage-positions/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/stage-positions/route.js"
-    ],
-    "/api/uniform-items/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/uniform-items/route.js"
-    ],
-    "/api/uniform-types/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/uniform-types/route.js"
-    ],
-    "/api/subpart-order/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/subpart-order/route.js"
     ],
     "/admin/layout": [
       "static/chunks/webpack.js",
@@ -91,6 +26,11 @@
       "static/chunks/main-app.js",
       "static/chunks/app/admin/page.js"
     ],
+    "/api/performances/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/performances/route.js"
+    ],
     "/admin/performances/[id]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -100,6 +40,16 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/api/rehearsals/route.js"
+    ],
+    "/api/parts/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/parts/route.js"
+    ],
+    "/api/performances/[id]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/performances/[id]/route.js"
     ],
     "/api/performance-contacts/route": [
       "static/chunks/webpack.js",
@@ -116,20 +66,105 @@
       "static/chunks/main-app.js",
       "static/chunks/app/api/rehearsal-attendance/route.js"
     ],
+    "/api/performances/[id]/roster/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/performances/[id]/roster/route.js"
+    ],
+    "/api/stage-positions/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/stage-positions/route.js"
+    ],
+    "/api/subparts/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/subparts/route.js"
+    ],
+    "/api/part-sides/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/part-sides/route.js"
+    ],
+    "/api/subpart-positions/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/subpart-positions/route.js"
+    ],
+    "/api/subpart-order/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/subpart-order/route.js"
+    ],
     "/api/signups/[id]/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/api/signups/[id]/route.js"
     ],
-    "/api/uniform-assignments/route": [
+    "/api/uniform-types/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/uniform-assignments/route.js"
+      "static/chunks/app/api/uniform-types/route.js"
+    ],
+    "/api/students/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/students/route.js"
+    ],
+    "/api/uniform-items/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/uniform-items/route.js"
     ],
     "/api/uniform-assignments/[id]/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/api/uniform-assignments/[id]/route.js"
+    ],
+    "/api/subparts/[id]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/subparts/[id]/route.js"
+    ],
+    "/api/marking-sessions/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/marking-sessions/route.js"
+    ],
+    "/api/performances/[id]/upload-music/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/performances/[id]/upload-music/route.js"
+    ],
+    "/api/parts/[id]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/parts/[id]/route.js"
+    ],
+    "/api/marking-sessions/[id]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/marking-sessions/[id]/route.js"
+    ],
+    "/api/equipment-usage/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/equipment-usage/route.js"
+    ],
+    "/api/equipment/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/equipment/route.js"
+    ],
+    "/api/equipment/[id]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/equipment/[id]/route.js"
+    ],
+    "/api/rehearse-notes/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/rehearse-notes/route.js"
     ]
   }
 }

@@ -6,7 +6,7 @@ import { usePerformances } from "@/hooks/usePerformances";
 import { StudentPositioningView } from "@/components/StudentPositioningView";
 import { AppBrand } from "@/components/AppBrand";
 import { ScheduleView } from "@/components/ScheduleView";
-import { formatDisplayDateTime, formatTimeString, getDateKeyInTimeZone } from "@/lib/datetime";
+import { formatDisplayDateTimeWithWeekday, formatTimeString, getDateKeyInTimeZone } from "@/lib/datetime";
 
 export default function StudentSignup() {
   const [activeTab, setActiveTab] = useState<"browse" | "mySignups" | "schedule">(
@@ -217,14 +217,14 @@ return (
                   <h3 className="font-semibold text-gray-900">{perf.title}</h3>
                   {isUpcoming ? (
                     <span className="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-700 border border-green-200">
-                      {formatDisplayDateTime(
+                      {formatDisplayDateTimeWithWeekday(
                         perf.date,
                         perf.timezone || "America/New_York"
                       )}
                     </span>
                   ) : (
                     <span className="text-xs font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                      {formatDisplayDateTime(
+                      {formatDisplayDateTimeWithWeekday(
                         perf.date,
                         perf.timezone || "America/New_York"
                       )}
@@ -570,7 +570,11 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
   const [assignedSubpartLabel, setAssignedSubpartLabel] = useState<string | null>(null);
   const [assignedPartNote, setAssignedPartNote] = useState<string | null>(null);
   const [assignedSubpartNote, setAssignedSubpartNote] = useState<string | null>(null);
+  const [assignedPartDescription, setAssignedPartDescription] = useState<string | null>(null);
+  const [assignedSubpartDescription, setAssignedSubpartDescription] = useState<string | null>(null);
   const [uniformNote, setUniformNote] = useState<string | null>(null);
+  const [uniformNextUseLabel, setUniformNextUseLabel] = useState<string | null>(null);
+  const [uniformNeedsReturn, setUniformNeedsReturn] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const musicUrl = signup.performance?.music_file_path
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/performance-music/${signup.performance.music_file_path}`
@@ -614,7 +618,11 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
       setAssignedSubpartLabel(null);
       setAssignedPartNote(null);
       setAssignedSubpartNote(null);
+      setAssignedPartDescription(null);
+      setAssignedSubpartDescription(null);
       setUniformNote(null);
+      setUniformNextUseLabel(null);
+      setUniformNeedsReturn(false);
       // Get all parts for this performance
       const perfRes = await fetch(`/api/performances/${signup.performance_id}`);
       const perf = await perfRes.json();
@@ -649,6 +657,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
       }
 
       if (partMatch) {
+        if (partMatch.description) setAssignedPartDescription(partMatch.description);
         const subRes = await fetch(`/api/subparts?partId=${partMatch.id}`);
         const subparts = await subRes.json();
         if (Array.isArray(subparts) && subparts.length > 0) {
@@ -660,6 +669,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
               : false;
             if (matches) {
               subpartLabel = sub.title || "Subpart";
+              if (sub.description) setAssignedSubpartDescription(sub.description);
               const subTime = formatTimeRange(sub.timepoint_seconds, sub.timepoint_end_seconds);
               if (subTime) timeLabel = subTime;
               const subNote = noteLookup.find(
@@ -680,14 +690,22 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
 
       if (signup.assigned_uniform_item_id) {
         try {
-          const [itemsRes, typesRes] = await Promise.all([
+          const [itemsRes, typesRes, perfsRes] = await Promise.all([
             fetch("/api/uniform-items"),
             fetch("/api/uniform-types"),
+            fetch("/api/performances"),
           ]);
           const items = await itemsRes.json();
           const types = await typesRes.json();
+          const perfs = await perfsRes.json();
           const typeMap = new Map(
             (Array.isArray(types) ? types : []).map((t: any) => [t.id, t.name])
+          );
+          const perfMap = new Map(
+            (Array.isArray(perfs) ? perfs : []).map((p: any) => [
+              p.id,
+              { title: p.title || p.name || p.id, date: p.date || null },
+            ])
           );
           const item = (Array.isArray(items) ? items : []).find(
             (entry: any) => entry.id === signup.assigned_uniform_item_id
@@ -708,6 +726,42 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             if (latest?.returned_at) status = "Returned";
             else if (latest?.distributed_at) status = "Distributed";
             setUniformNote(`${itemType} #${item.item_number} (${status})`);
+
+            const currentPerfDate = signup.performance?.date
+              ? new Date(signup.performance.date).getTime()
+              : null;
+            const baseTime = currentPerfDate ?? Date.now();
+            const upcoming = (item.uniform_assignments || [])
+              .filter((assignment: any) => assignment.performance_id && !assignment.returned_at)
+              .map((assignment: any) => {
+                const perfInfo = perfMap.get(assignment.performance_id);
+                const perfTime = perfInfo?.date ? new Date(perfInfo.date).getTime() : null;
+                return { assignment, perfInfo, perfTime };
+              })
+              .filter((entry: any) => entry.perfTime !== null && entry.perfTime > baseTime)
+              .sort((a: any, b: any) => (a.perfTime as number) - (b.perfTime as number));
+            if (upcoming.length > 0) {
+              const next = upcoming[0];
+              const title = next.perfInfo?.title || "Performance";
+              const dateLabel = next.perfInfo?.date
+                ? formatDisplayDateTime(
+                    next.perfInfo.date,
+                    signup.performance?.timezone || "America/New_York"
+                  )
+                : "";
+              if (next.assignment.student_id === signup.student_id) {
+                setUniformNextUseLabel(
+                  `${studentName} is assigned for ${title}${dateLabel ? ` (${dateLabel})` : ""} coming up.`
+                );
+              } else {
+                setUniformNextUseLabel(
+                  `Uniform must be returned after this performance. Next use: ${title}${
+                    dateLabel ? ` (${dateLabel})` : ""
+                  } is assigned to ${next.assignment.student_name || "another student"}.`
+                );
+                setUniformNeedsReturn(true);
+              }
+            }
           }
         } catch (err) {
           console.warn("Failed to load uniform info:", err);
@@ -883,7 +937,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                   )}
                 </div>
               )}
-              {(assignedSubpartNote || assignedPartNote) && (
+              {(assignedSubpartNote || assignedPartNote || assignedSubpartDescription || assignedPartDescription) && (
                 <div className="mt-3 text-sm text-gray-600 space-y-2">
                   {assignedSubpartNote && (
                     <div>
@@ -896,14 +950,51 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                       Part Note: <span className="font-medium text-gray-800">{assignedPartNote}</span>
                     </div>
                   )}
+                  {assignedSubpartDescription && (
+                    <div>
+                      Subpart Notes:{" "}
+                      <span className="font-medium text-gray-800">{assignedSubpartDescription}</span>
+                    </div>
+                  )}
+                  {assignedPartDescription && (
+                    <div>
+                      Part Notes:{" "}
+                      <span className="font-medium text-gray-800">{assignedPartDescription}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
-          {uniformNote && (
+          {(uniformNote || uniformNextUseLabel) && (
             <div className="mb-4 pb-4 border-b border-green-200">
-              <span className="font-semibold text-gray-700">Uniform:</span>{" "}
-              <span className="text-gray-600 font-medium">{uniformNote}</span>
+              <div className="text-sm font-semibold text-gray-700 mb-2">Uniform Assignment</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <div className="text-[11px] text-gray-500 uppercase">Name</div>
+                  <div className="font-medium text-gray-900">{studentName || "Student"}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-gray-500 uppercase">Uniform</div>
+                  <div className="font-medium text-gray-800">{uniformNote || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-gray-500 uppercase">Next Use</div>
+                  {uniformNextUseLabel ? (
+                    <div
+                      className={
+                        uniformNeedsReturn
+                          ? "mt-1 border-2 border-red-500 bg-red-50 text-red-700 rounded px-3 py-2 text-xs shadow-[0_0_12px_rgba(239,68,68,0.6)] animate-pulse"
+                          : "mt-1 text-xs text-gray-700"
+                      }
+                    >
+                      {uniformNextUseLabel}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500">&nbsp;</div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

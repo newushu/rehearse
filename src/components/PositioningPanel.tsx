@@ -17,6 +17,26 @@ interface PositionEntry {
   id?: string;
 }
 
+interface EquipmentItem {
+  id: string;
+  performance_id: string;
+  name: string;
+  initial_side?: StageSide | null;
+  created_at?: string;
+}
+
+interface EquipmentUsage {
+  id: string;
+  equipment_id: string;
+  part_id: string;
+  subpart_id: string | null;
+  student_id: string;
+  student_name?: string;
+}
+
+type StageSide = "OS" | "SL" | "SR";
+const DEFAULT_SIDE: StageSide = "OS";
+
 interface PositioningPanelProps {
   performanceId: string;
   partId: string;
@@ -81,7 +101,16 @@ export function PositioningPanel({
   const [subparts, setSubparts] = useState<Array<{ id: string; title: string; description?: string | null; mode?: string; timepoint_seconds?: number | null; timepoint_end_seconds?: number | null }>>([]);
   const [selectedSubpartId, setSelectedSubpartId] = useState<string | null>(null);
   const [subpartPositions, setSubpartPositions] = useState<Record<string, PositionEntry[]>>({});
-  const [subpartOrder, setSubpartOrder] = useState<Record<string, Array<{ id: string; student_id: string; student_name: string }>>>({});
+  const [subpartOrder, setSubpartOrder] = useState<
+    Record<string, Array<{ id: string; student_id: string; student_name: string; start_side?: StageSide | null; end_side?: StageSide | null }>>
+  >({});
+  const [partSides, setPartSides] = useState<Record<string, Array<{ id: string; student_id: string; student_name: string; start_side?: StageSide | null; end_side?: StageSide | null }>>>({});
+  const [draggingSideStudent, setDraggingSideStudent] = useState<string | null>(null);
+  const [draggingSideMeta, setDraggingSideMeta] = useState<{
+    student_id: string;
+    field: "start_side" | "end_side";
+    side: StageSide;
+  } | null>(null);
   const [draggingOrderId, setDraggingOrderId] = useState<string | null>(null);
   const [draggingSubpartId, setDraggingSubpartId] = useState<string | null>(null);
   const [editingPartName, setEditingPartName] = useState(false);
@@ -101,6 +130,33 @@ export function PositioningPanel({
   const [selectedSourceKey, setSelectedSourceKey] = useState("");
   const [flipHorizontal, setFlipHorizontal] = useState(false);
   const [applyingQuick, setApplyingQuick] = useState(false);
+  const [equipmentItems, setEquipmentItems] = useState<EquipmentItem[]>([]);
+  const [equipmentUsage, setEquipmentUsage] = useState<EquipmentUsage[]>([]);
+  const [newEquipmentName, setNewEquipmentName] = useState("");
+  const [equipmentLoading, setEquipmentLoading] = useState(false);
+  const [equipmentStudentDraft, setEquipmentStudentDraft] = useState<Record<string, string>>({});
+  const [allPartsForEquipment, setAllPartsForEquipment] = useState<
+    Array<{ id: string; name: string; order: number; timepoint_seconds?: number | null }>
+  >([]);
+  const [allSubpartsByPart, setAllSubpartsByPart] = useState<
+    Record<string, Array<{ id: string; title: string; part_id: string; timepoint_seconds?: number | null; order?: number | null }>>
+  >({});
+  const [allPartSides, setAllPartSides] = useState<
+    Record<string, Array<{ student_id: string; start_side?: StageSide | null; end_side?: StageSide | null }>>
+  >({});
+  const [allSubpartSides, setAllSubpartSides] = useState<
+    Record<string, Array<{ student_id: string; start_side?: StageSide | null; end_side?: StageSide | null }>>
+  >({});
+
+  const orderedSubparts = useMemo(() => {
+    const list = [...subparts];
+    return list.sort((a, b) => {
+      const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
+      const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
+      if (aStart !== bStart) return aStart - bStart;
+      return (a.title || "").localeCompare(b.title || "");
+    });
+  }, [subparts]);
 
   const fetchSubparts = useCallback(async () => {
     try {
@@ -131,6 +187,84 @@ export function PositioningPanel({
       console.error("Error fetching roster:", err);
     }
   }, [performanceId, partId]);
+
+  const fetchEquipmentData = useCallback(async () => {
+    if (!performanceId) return;
+    setEquipmentLoading(true);
+    try {
+      const [equipmentRes, usageRes] = await Promise.all([
+        fetch(`/api/equipment?performanceId=${performanceId}`),
+        fetch(`/api/equipment-usage?performanceId=${performanceId}`),
+      ]);
+      if (equipmentRes.ok) {
+        const data = await equipmentRes.json();
+        setEquipmentItems(data || []);
+      }
+      if (usageRes.ok) {
+        const data = await usageRes.json();
+        setEquipmentUsage(data || []);
+      }
+    } catch (err) {
+      console.error("Error fetching equipment:", err);
+    } finally {
+      setEquipmentLoading(false);
+    }
+  }, [performanceId]);
+
+  const fetchEquipmentParts = useCallback(async () => {
+    if (!performanceId) return;
+    try {
+      const partsRes = await fetch(`/api/parts?performanceId=${performanceId}`);
+      if (!partsRes.ok) return;
+      const partsData = await partsRes.json();
+      setAllPartsForEquipment(partsData || []);
+
+      const subpartEntries = await Promise.all(
+        (partsData || []).map(async (part: any) => {
+          const res = await fetch(`/api/subparts?partId=${part.id}`);
+          if (!res.ok) return [part.id, []] as const;
+          const data = await res.json();
+          return [part.id, data || []] as const;
+        })
+      );
+      const subpartsMap: Record<string, any[]> = {};
+      subpartEntries.forEach(([pid, list]) => {
+        subpartsMap[pid] = list;
+      });
+      setAllSubpartsByPart(subpartsMap);
+
+      const partSidesEntries = await Promise.all(
+        (partsData || []).map(async (part: any) => {
+          const res = await fetch(`/api/part-sides?partId=${part.id}`);
+          if (!res.ok) return [part.id, []] as const;
+          const data = await res.json();
+          return [part.id, data || []] as const;
+        })
+      );
+      const partSidesMap: Record<string, any[]> = {};
+      partSidesEntries.forEach(([pid, list]) => {
+        partSidesMap[pid] = list;
+      });
+      setAllPartSides(partSidesMap);
+
+      const subpartIds = Object.values(subpartsMap).flat().map((sub: any) => sub.id);
+      const subpartSidesEntries = await Promise.all(
+        subpartIds.map(async (subpartId: string) => {
+          const res = await fetch(`/api/subpart-order?subpartId=${subpartId}`);
+          if (!res.ok) return [subpartId, []] as const;
+          const data = await res.json();
+          return [subpartId, data || []] as const;
+        })
+      );
+      const subpartSidesMap: Record<string, any[]> = {};
+      subpartSidesEntries.forEach(([sid, list]) => {
+        subpartSidesMap[sid] = list;
+      });
+      setAllSubpartSides(subpartSidesMap);
+    } catch (err) {
+      console.error("Error fetching equipment parts:", err);
+    }
+  }, [performanceId]);
 
   // Fetch roster, existing positions, and performance orientation
   useEffect(() => {
@@ -174,6 +308,11 @@ export function PositioningPanel({
 
     fetchData();
   }, [performanceId, partId, isGroup, fetchSubparts, fetchRosterOnly]);
+
+  useEffect(() => {
+    fetchEquipmentData();
+    fetchEquipmentParts();
+  }, [fetchEquipmentData, fetchEquipmentParts]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -311,6 +450,8 @@ export function PositioningPanel({
               id: item.id,
               student_id: item.student_id,
               student_name: item.student_name || "Unknown",
+              start_side: item.start_side ?? DEFAULT_SIDE,
+              end_side: item.end_side ?? DEFAULT_SIDE,
             })),
           }));
         }
@@ -321,6 +462,30 @@ export function PositioningPanel({
 
     fetchSubpartData();
   }, [selectedSubpartId]);
+
+  useEffect(() => {
+    if (subparts.length > 0) return;
+    const fetchPartSides = async () => {
+      try {
+        const res = await fetch(`/api/part-sides?partId=${partId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setPartSides((prev) => ({
+          ...prev,
+          [partId]: (data || []).map((item: any) => ({
+            id: item.id,
+            student_id: item.student_id,
+            student_name: item.student_name || "Unknown",
+            start_side: item.start_side ?? DEFAULT_SIDE,
+            end_side: item.end_side ?? DEFAULT_SIDE,
+          })),
+        }));
+      } catch (err) {
+        console.error("Error fetching part sides:", err);
+      }
+    };
+    fetchPartSides();
+  }, [partId, subparts.length]);
 
   // Auto-save effect
   useEffect(() => {
@@ -580,9 +745,10 @@ export function PositioningPanel({
     }
   };
 
-  const persistOrder = useCallback(async (items: Array<{ id: string; student_id: string; student_name: string }>) => {
+  const persistOrder = useCallback(async (items: Array<{ id: string; student_id: string; student_name: string; start_side?: StageSide | null; end_side?: StageSide | null }>) => {
     if (!selectedSubpartId) return;
     setSubpartOrder((prev) => ({ ...prev, [selectedSubpartId]: items }));
+    setAllSubpartSides((prev) => ({ ...prev, [selectedSubpartId]: items }));
     await fetch("/api/subpart-order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -591,6 +757,8 @@ export function PositioningPanel({
           subpart_id: selectedSubpartId,
           student_id: item.student_id,
           order: idx + 1,
+          start_side: item.start_side ?? DEFAULT_SIDE,
+          end_side: item.end_side ?? DEFAULT_SIDE,
         }))
       ),
     });
@@ -598,13 +766,22 @@ export function PositioningPanel({
 
   const addToOrder = async (studentId: string, studentName: string) => {
     if (!selectedSubpartId) return;
-    const next = [...orderItems, { id: `temp-${Date.now()}`, student_id: studentId, student_name: studentName }];
+    const next = [
+      ...orderItems,
+      {
+        id: `temp-${Date.now()}`,
+        student_id: studentId,
+        student_name: studentName,
+        start_side: DEFAULT_SIDE,
+        end_side: DEFAULT_SIDE,
+      },
+    ];
     await persistOrder(next);
   };
 
   const addMissingAssignedFromPositions = useCallback(async (
     positionsList: PositionEntry[],
-    currentItems: Array<{ id: string; student_id: string; student_name: string }>
+    currentItems: Array<{ id: string; student_id: string; student_name: string; start_side?: StageSide | null; end_side?: StageSide | null }>
   ) => {
     if (!selectedSubpartId) return;
     const existing = new Set(currentItems.map((item) => item.student_id));
@@ -614,11 +791,80 @@ export function PositioningPanel({
         id: `temp-${Date.now()}-${pos.student_id}`,
         student_id: pos.student_id,
         student_name: pos.name,
+        start_side: DEFAULT_SIDE,
+        end_side: DEFAULT_SIDE,
       }));
     if (missing.length === 0) return;
     const next = [...currentItems, ...missing];
     await persistOrder(next);
   }, [persistOrder, selectedSubpartId]);
+
+  const orderItems = useMemo(
+    () => (selectedSubpartId ? subpartOrder[selectedSubpartId] || [] : []),
+    [selectedSubpartId, subpartOrder]
+  );
+  const partSideItems = useMemo(
+    () => (subparts.length === 0 ? partSides[partId] || [] : []),
+    [partSides, partId, subparts.length]
+  );
+
+  const persistPartSides = useCallback(
+    async (items: Array<{ id: string; student_id: string; student_name: string; start_side?: StageSide | null; end_side?: StageSide | null }>) => {
+      setPartSides((prev) => ({ ...prev, [partId]: items }));
+      setAllPartSides((prev) => ({ ...prev, [partId]: items }));
+      await fetch("/api/part-sides", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          items.map((item) => ({
+            part_id: partId,
+            student_id: item.student_id,
+            start_side: item.start_side ?? DEFAULT_SIDE,
+            end_side: item.end_side ?? DEFAULT_SIDE,
+          }))
+        ),
+      });
+    },
+    [partId]
+  );
+
+  const ensureRosterSides = useCallback(async () => {
+    const base = subparts.length > 0 ? orderItems : partSideItems;
+    if (roster.length === 0) return;
+    const existing = new Map(base.map((item) => [item.student_id, item]));
+    const next = [...base];
+
+    let prevEndByStudent = new Map<string, StageSide>();
+    if (subparts.length > 0 && selectedSubpartId) {
+      const idx = orderedSubparts.findIndex((s) => s.id === selectedSubpartId);
+      if (idx > 0) {
+        const prevId = orderedSubparts[idx - 1]?.id;
+        const prevItems = prevId ? subpartOrder[prevId] || [] : [];
+        prevEndByStudent = new Map(
+          prevItems.map((item) => [item.student_id, (item.end_side || DEFAULT_SIDE) as StageSide])
+        );
+      }
+    }
+
+    roster.forEach((student) => {
+      if (existing.has(student.student_id)) return;
+      const fallback = prevEndByStudent.get(student.student_id) || DEFAULT_SIDE;
+      next.push({
+        id: `temp-${Date.now()}-${student.student_id}`,
+        student_id: student.student_id,
+        student_name: student.name,
+        start_side: fallback,
+        end_side: fallback,
+      });
+    });
+
+    if (next.length === base.length) return;
+    if (subparts.length > 0) {
+      await persistOrder(next);
+    } else {
+      await persistPartSides(next);
+    }
+  }, [orderItems, partSideItems, roster, subparts.length, selectedSubpartId, orderedSubparts, subpartOrder, persistOrder, persistPartSides]);
 
   const handleReorderSubparts = useCallback(async (fromIndex: number, toIndex: number) => {
     if (toIndex < 0 || toIndex >= subparts.length) return;
@@ -649,6 +895,10 @@ export function PositioningPanel({
     if (positionsList.length === 0) return;
     addMissingAssignedFromPositions(positionsList, items);
   }, [selectedSubpartId, subpartPositions, subpartOrder, addMissingAssignedFromPositions]);
+
+  useEffect(() => {
+    ensureRosterSides();
+  }, [ensureRosterSides]);
 
   const loadSourcePositions = async () => {
     if (!selectedSourceKey) return [];
@@ -721,15 +971,14 @@ export function PositioningPanel({
   };
 
   const activeSubpart = subparts.find((s) => s.id === selectedSubpartId);
-  const orderedSubparts = useMemo(() => {
-    const list = [...subparts];
-    return list.sort((a, b) => {
-      const aStart = typeof a.timepoint_seconds === "number" ? a.timepoint_seconds : Number.POSITIVE_INFINITY;
-      const bStart = typeof b.timepoint_seconds === "number" ? b.timepoint_seconds : Number.POSITIVE_INFINITY;
-      if (aStart !== bStart) return aStart - bStart;
-      return (a.title || "").localeCompare(b.title || "");
-    });
-  }, [subparts]);
+
+  useEffect(() => {
+    if (subparts.length === 0) return;
+    if (selectedSubpartId) return;
+    if (orderedSubparts.length > 0) {
+      setSelectedSubpartId(orderedSubparts[0].id);
+    }
+  }, [subparts.length, orderedSubparts, selectedSubpartId]);
   const subpartDuration = activeSubpart
     ? formatDuration(activeSubpart.timepoint_seconds as any, activeSubpart.timepoint_end_seconds as any)
     : "";
@@ -739,10 +988,6 @@ export function PositioningPanel({
   const subpartMode = activeSubpart?.mode || "position";
   const canPosition = subparts.length === 0 || subpartMode !== "order";
   const canOrder = subparts.length > 0;
-  const orderItems = useMemo(
-    () => (selectedSubpartId ? subpartOrder[selectedSubpartId] || [] : []),
-    [selectedSubpartId, subpartOrder]
-  );
   const orderIndexByStudentId = useMemo(() => {
     const map: Record<string, number> = {};
     orderItems.forEach((item, idx) => {
@@ -755,6 +1000,9 @@ export function PositioningPanel({
     selectedSubpartId && subparts.length > 0
       ? subpartPositions[selectedSubpartId] || []
       : positions;
+  const sideItems = subparts.length > 0 ? orderItems : partSideItems;
+  const unassignedStartCount = sideItems.filter((item) => !item.start_side).length;
+  const unassignedEndCount = sideItems.filter((item) => !item.end_side).length;
   const positionedStudents = new Set(activePositions.map((p) => p.student_id));
   const availableStudents = roster;
 
@@ -771,6 +1019,289 @@ export function PositioningPanel({
     name: pos.name,
     initials: generateInitials(pos.name, Array.from(uniqueStudents.values()).map((p) => p.name)),
   }));
+  const rosterById = useMemo(() => {
+    const map = new Map<string, string>();
+    roster.forEach((student) => map.set(student.student_id, student.name));
+    return map;
+  }, [roster]);
+
+  const currentSegmentKey = selectedSubpartId && subparts.length > 0 ? `subpart:${selectedSubpartId}` : `part:${partId}`;
+
+  const equipmentSegments = useMemo(() => {
+    const segments: Array<{
+      key: string;
+      part_id: string;
+      subpart_id: string | null;
+      label: string;
+      timepoint?: number | null;
+      orderFallback: number;
+    }> = [];
+    allPartsForEquipment.forEach((part, partIdx) => {
+      const subs = allSubpartsByPart[part.id] || [];
+      if (subs.length > 0) {
+        subs.forEach((sub, subIdx) => {
+          segments.push({
+            key: `subpart:${sub.id}`,
+            part_id: part.id,
+            subpart_id: sub.id,
+            label: sub.title || part.name,
+            timepoint: sub.timepoint_seconds ?? null,
+            orderFallback: partIdx * 100 + subIdx,
+          });
+        });
+      } else {
+        segments.push({
+          key: `part:${part.id}`,
+          part_id: part.id,
+          subpart_id: null,
+          label: part.name,
+          timepoint: part.timepoint_seconds ?? null,
+          orderFallback: partIdx * 100,
+        });
+      }
+    });
+    return segments.sort((a, b) => {
+      const aTime = typeof a.timepoint === "number" ? a.timepoint : Number.POSITIVE_INFINITY;
+      const bTime = typeof b.timepoint === "number" ? b.timepoint : Number.POSITIVE_INFINITY;
+      if (aTime !== bTime) return aTime - bTime;
+      return a.orderFallback - b.orderFallback;
+    });
+  }, [allPartsForEquipment, allSubpartsByPart]);
+
+  const segmentIndexByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    equipmentSegments.forEach((seg, idx) => map.set(seg.key, idx));
+    return map;
+  }, [equipmentSegments]);
+
+  const segmentSides = useMemo(() => {
+    const map = new Map<string, Map<string, { start_side?: StageSide | null; end_side?: StageSide | null }>>();
+    equipmentSegments.forEach((seg) => {
+      const items =
+        seg.subpart_id && allSubpartSides[seg.subpart_id]
+          ? allSubpartSides[seg.subpart_id]
+          : allPartSides[seg.part_id] || [];
+      const byStudent = new Map<string, { start_side?: StageSide | null; end_side?: StageSide | null }>();
+      items.forEach((item) => {
+        byStudent.set(item.student_id, {
+          start_side: item.start_side ?? null,
+          end_side: item.end_side ?? null,
+        });
+      });
+      map.set(seg.key, byStudent);
+    });
+    return map;
+  }, [equipmentSegments, allPartSides, allSubpartSides]);
+
+  const usageBySegment = useMemo(() => {
+    const map = new Map<string, EquipmentUsage[]>();
+    equipmentUsage.forEach((usage) => {
+      const key = usage.subpart_id ? `subpart:${usage.subpart_id}` : `part:${usage.part_id}`;
+      const list = map.get(key) || [];
+      list.push(usage);
+      map.set(key, list);
+    });
+    return map;
+  }, [equipmentUsage]);
+
+  const usageByEquipment = useMemo(() => {
+    const map = new Map<string, EquipmentUsage[]>();
+    equipmentUsage.forEach((usage) => {
+      const list = map.get(usage.equipment_id) || [];
+      list.push(usage);
+      map.set(usage.equipment_id, list);
+    });
+    return map;
+  }, [equipmentUsage]);
+
+  const equipmentDisplay = useMemo(() => {
+    const currentIdx = segmentIndexByKey.get(currentSegmentKey) ?? -1;
+    return equipmentItems.map((equipment) => {
+      const usageList = usageByEquipment.get(equipment.id) || [];
+      const activeUsage = usageList.find((u) => {
+        const key = u.subpart_id ? `subpart:${u.subpart_id}` : `part:${u.part_id}`;
+        return key === currentSegmentKey;
+      });
+
+      let startSide: StageSide | null = null;
+      let endSide: StageSide | null = null;
+      let activeStudentName =
+        activeUsage?.student_name || (activeUsage ? rosterById.get(activeUsage.student_id) || "" : "");
+
+      if (activeUsage) {
+        const sideMap = segmentSides.get(currentSegmentKey);
+        const sides = sideMap?.get(activeUsage.student_id);
+        startSide = (sides?.start_side as StageSide) || null;
+        endSide = (sides?.end_side as StageSide) || null;
+      } else if (currentIdx >= 0) {
+        let prevSide: StageSide | null = equipment.initial_side ?? null;
+        for (let idx = currentIdx - 1; idx >= 0; idx -= 1) {
+          const seg = equipmentSegments[idx];
+          const list = usageBySegment.get(seg.key) || [];
+          const usage = list.find((u) => u.equipment_id === equipment.id);
+          if (!usage) continue;
+          const sideMap = segmentSides.get(seg.key);
+          const sides = sideMap?.get(usage.student_id);
+          prevSide = (sides?.end_side as StageSide) || prevSide;
+          break;
+        }
+        startSide = prevSide;
+        endSide = null;
+      }
+
+      return {
+        equipment,
+        activeUsage,
+        activeStudentName,
+        startSide,
+        endSide,
+        isActive: Boolean(activeUsage),
+      };
+    }).sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  }, [
+    equipmentItems,
+    equipmentSegments,
+    usageByEquipment,
+    usageBySegment,
+    segmentSides,
+    segmentIndexByKey,
+    currentSegmentKey,
+    rosterById,
+  ]);
+
+  const uniqueSideList = useCallback(
+    (list: typeof sideItems) => {
+      const seen = new Set<string>();
+      return list.filter((item) => {
+        if (seen.has(item.student_id)) return false;
+        seen.add(item.student_id);
+        return true;
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    setEquipmentStudentDraft((prev) => {
+      const next = { ...prev };
+      equipmentDisplay.forEach((item) => {
+        if (item.activeUsage?.student_id) {
+          next[item.equipment.id] = item.activeUsage.student_id;
+        }
+      });
+      return next;
+    });
+  }, [equipmentDisplay]);
+
+  const handleAddEquipment = useCallback(async () => {
+    const name = newEquipmentName.trim();
+    if (!name) return;
+    const res = await fetch("/api/equipment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        performance_id: performanceId,
+        name,
+        initial_side: null,
+      }),
+    });
+    if (!res.ok) return;
+    const created = await res.json();
+    setEquipmentItems((prev) => [...prev, created]);
+    setNewEquipmentName("");
+  }, [newEquipmentName, performanceId]);
+
+  const handleUpdateEquipment = useCallback(async (id: string, payload: Partial<EquipmentItem>) => {
+    const res = await fetch(`/api/equipment/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return;
+    const updated = await res.json();
+    setEquipmentItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
+  }, []);
+
+  const handleToggleEquipmentActive = useCallback(
+    async (equipmentId: string, active: boolean) => {
+      const segment = currentSegmentKey;
+      const isSubpart = segment.startsWith("subpart:");
+      const subpartId = isSubpart ? segment.replace("subpart:", "") : null;
+      const selectedStudent = equipmentStudentDraft[equipmentId];
+      if (active) {
+        if (!selectedStudent) return;
+        const res = await fetch("/api/equipment-usage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            equipment_id: equipmentId,
+            part_id: partId,
+            subpart_id: subpartId,
+            student_id: selectedStudent,
+          }),
+        });
+        if (!res.ok) return;
+        const created = await res.json();
+        setEquipmentUsage((prev) => {
+          const filtered = prev.filter((u) => !(u.equipment_id === equipmentId && u.part_id === partId && (u.subpart_id || null) === (subpartId || null)));
+          return [
+            ...filtered,
+            {
+              ...created,
+              student_name: rosterById.get(selectedStudent) || created.student_name,
+            },
+          ];
+        });
+      } else {
+        const query = new URLSearchParams({
+          equipment_id: equipmentId,
+          part_id: partId,
+        });
+        if (subpartId) query.set("subpart_id", subpartId);
+        const res = await fetch(`/api/equipment-usage?${query.toString()}`, { method: "DELETE" });
+        if (!res.ok) return;
+        setEquipmentUsage((prev) =>
+          prev.filter(
+            (u) =>
+              !(u.equipment_id === equipmentId && u.part_id === partId && (u.subpart_id || null) === (subpartId || null))
+          )
+        );
+      }
+    },
+    [currentSegmentKey, equipmentStudentDraft, partId, rosterById]
+  );
+
+  const saveEquipmentUsage = useCallback(
+    async (equipmentId: string, studentId: string) => {
+      const segment = currentSegmentKey;
+      const isSubpart = segment.startsWith("subpart:");
+      const subpartId = isSubpart ? segment.replace("subpart:", "") : null;
+      if (!studentId) return;
+      const res = await fetch("/api/equipment-usage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          equipment_id: equipmentId,
+          part_id: partId,
+          subpart_id: subpartId,
+          student_id: studentId,
+        }),
+      });
+      if (!res.ok) return;
+      const created = await res.json();
+      setEquipmentUsage((prev) => {
+        const filtered = prev.filter((u) => !(u.equipment_id === equipmentId && u.part_id === partId && (u.subpart_id || null) === (subpartId || null)));
+        return [
+          ...filtered,
+          {
+            ...created,
+            student_name: rosterById.get(studentId) || created.student_name,
+          },
+        ];
+      });
+    },
+    [currentSegmentKey, partId, rosterById]
+  );
 
   if (loading) {
     return <div className="text-center py-8">Loading...</div>;
@@ -799,11 +1330,17 @@ export function PositioningPanel({
             ) : (
               availableStudents.map((student) => {
                 const isPositioned = positionedStudents.has(student.student_id);
+                const sideInfo = sideItems.find((item) => item.student_id === student.student_id);
+                const startSide = sideInfo?.start_side || DEFAULT_SIDE;
+                const endSide = sideInfo?.end_side || DEFAULT_SIDE;
                 return (
                   <div
                     key={student.student_id}
                     draggable
-                    onDragStart={() => handleDragStart(student.student_id, false)}
+                    onDragStart={() => {
+                      handleDragStart(student.student_id, false);
+                      setDraggingSideStudent(student.student_id);
+                    }}
                     className={`p-3 rounded border cursor-move hover:shadow-md transition-all ${
                       isPositioned
                         ? "bg-emerald-50 border-emerald-200 hover:border-emerald-300"
@@ -820,6 +1357,10 @@ export function PositioningPanel({
                         </span>
                       )}
                     </div>
+                    <div className="text-[10px] text-gray-500 mt-1">
+                      Start: <span className="font-semibold text-gray-700">{startSide}</span>{" "}
+                      End: <span className="font-semibold text-gray-700">{endSide}</span>
+                    </div>
                     {student.part_name && (
                       <p className="text-xs text-gray-600">{student.part_name}</p>
                     )}
@@ -831,70 +1372,37 @@ export function PositioningPanel({
 
           {canOrder && selectedSubpartId && (
             <div className="mt-4 border-t border-gray-200 pt-4">
-              <h4 className="font-medium text-gray-900 mb-2 text-sm">
-                Assigned Students
-              </h4>
-              <p className="text-[11px] text-gray-500 mb-2">
-                Drag students here to assign them to this subpart.
-              </p>
-              <div
-                className="bg-white p-2 rounded border border-gray-200"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={async () => {
-                  if (draggingOrderId) return;
-                  if (!draggedStudent) return;
-                  if (orderItems.some((item) => item.student_id === draggedStudent)) return;
-                  const student = roster.find((s) => s.student_id === draggedStudent);
-                  if (!student) return;
-                  await addToOrder(student.student_id, student.name);
-                }}
-              >
-                <div className="space-y-2">
-                  {orderItems.length === 0 ? (
-                    <div className="text-xs text-gray-500 border border-dashed border-gray-300 rounded p-2 text-center">
-                      Drop students here
-                    </div>
-                  ) : (
-                    orderItems.map((item, idx) => (
-                      <div
-                        key={item.id}
-                        draggable
-                        onDragStart={() => {
-                          setDraggingOrderId(item.id);
-                          setDraggedStudent(null);
-                          setDraggedFromGrid(false);
-                        }}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={async () => {
-                          if (!draggingOrderId) return;
-                          const fromIdx = orderItems.findIndex((i) => i.id === draggingOrderId);
-                          const toIdx = orderItems.findIndex((i) => i.id === item.id);
-                          if (fromIdx < 0 || toIdx < 0) return;
-                          const next = [...orderItems];
-                          const [moved] = next.splice(fromIdx, 1);
-                          next.splice(toIdx, 0, moved);
-                          await persistOrder(next);
-                          setDraggingOrderId(null);
-                        }}
-                        className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded px-2 py-1"
-                      >
-                        <div className="text-xs text-gray-900">
-                          <span className="text-gray-500 mr-1">{idx + 1}.</span>
-                          {item.student_name}
-                        </div>
-                        <button
-                          onClick={async () => {
-                            const next = orderItems.filter((i) => i.id !== item.id);
-                            await persistOrder(next);
-                          }}
-                          className="text-[10px] text-red-600 hover:text-red-800"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p className="text-[11px] text-gray-500">
+                  Everyone has a start and end side (OS, SL, SR).
+                </p>
+                {subparts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!selectedSubpartId) return;
+                      const idx = orderedSubparts.findIndex((s) => s.id === selectedSubpartId);
+                      if (idx <= 0) return;
+                      const prevId = orderedSubparts[idx - 1]?.id;
+                      if (!prevId) return;
+                      const prevItems = subpartOrder[prevId] || [];
+                      const endByStudent = new Map(
+                        prevItems.map((item) => [item.student_id, item.end_side || DEFAULT_SIDE])
+                      );
+                      const next = orderItems.map((item) => ({
+                        ...item,
+                        start_side:
+                          (endByStudent.get(item.student_id) as StageSide | undefined) ||
+                          item.start_side ||
+                          DEFAULT_SIDE,
+                      }));
+                      await persistOrder(next);
+                    }}
+                    className="text-[10px] px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  >
+                    Set start from previous end
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -1335,7 +1843,7 @@ export function PositioningPanel({
             )}
 
             {/* Grid */}
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex items-start justify-center gap-3">
               {orderedSubparts.length > 0 && canPosition && (
                 <button
                   onClick={() => {
@@ -1348,11 +1856,200 @@ export function PositioningPanel({
                   Prev
                 </button>
               )}
+
+              {/* Stage Right (left of grid) */}
+              <div className="space-y-3 w-48">
+                {(["start_side", "end_side"] as const).map((field) => (
+                  <div key={`sr-${field}`} className="bg-white border border-gray-200 rounded p-2">
+                    <div className="text-[11px] font-semibold text-gray-700 mb-1">
+                      Stage Right {field === "start_side" ? "Start" : "End"}
+                    </div>
+                    <div
+                      className="border border-dashed border-gray-300 rounded p-2 min-h-[64px]"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={async () => {
+                        if (!draggingSideStudent) return;
+                        const next = sideItems.map((item) =>
+                          item.student_id === draggingSideStudent
+                            ? { ...item, [field]: "SR" as StageSide }
+                            : item
+                        );
+                        if (subparts.length > 0) {
+                          await persistOrder(next);
+                        } else {
+                          await persistPartSides(next);
+                        }
+                        setDraggingSideStudent(null);
+                        setDraggingSideMeta(null);
+                      }}
+                    >
+                      <div className="flex flex-wrap gap-2">
+                          {uniqueSideList(
+                            sideItems.filter((item) => (item[field] || DEFAULT_SIDE) === "SR")
+                          ).map((item, idx, list) => {
+                            const active = positionedStudents.has(item.student_id);
+                            return (
+                              <span
+                                key={`sr-${field}-${item.student_id}-${idx}`}
+                                draggable
+                                onDragStart={() => {
+                                  setDraggingSideStudent(item.student_id);
+                                  setDraggingSideMeta({ student_id: item.student_id, field, side: "SR" });
+                                }}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={async () => {
+                                  if (!draggingSideMeta) return;
+                                  if (draggingSideMeta.field === field && draggingSideMeta.side === "SR") {
+                                    const ids = list.map((entry) => entry.student_id);
+                                    const from = ids.indexOf(draggingSideMeta.student_id);
+                                    const to = ids.indexOf(item.student_id);
+                                    if (from < 0 || to < 0 || from === to) return;
+                                    const reordered = [...list];
+                                    const [moved] = reordered.splice(from, 1);
+                                    reordered.splice(to, 0, moved);
+                                    const orderMap = new Map(
+                                      reordered.map((entry, index) => [entry.student_id, index])
+                                    );
+                                    const next = sideItems.slice().sort((a, b) => {
+                                      const aIdx = orderMap.get(a.student_id);
+                                      const bIdx = orderMap.get(b.student_id);
+                                      if (aIdx === undefined || bIdx === undefined) return 0;
+                                      return aIdx - bIdx;
+                                    });
+                                    if (subparts.length > 0) {
+                                      await persistOrder(next);
+                                    } else {
+                                      await persistPartSides(next);
+                                    }
+                                    setDraggingSideMeta(null);
+                                  }
+                                }}
+                                className={`px-2 py-0.5 rounded-full text-[10px] border cursor-move ${
+                                  active
+                                    ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                    : "bg-gray-100 text-gray-700 border-gray-300"
+                                }`}
+                              >
+                                {idx + 1}. {item.student_name}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <div className="text-[10px] text-gray-500">
+                  Start not set: {unassignedStartCount} • End not set: {unassignedEndCount}
+                </div>
+              </div>
+
               <div
                 ref={gridWrapRef}
                 className="w-full overflow-hidden"
                 style={{ height: baseHeight * gridScale }}
               >
+                <div className="mb-2 bg-white border border-gray-200 rounded p-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[11px] font-semibold text-gray-700 mb-1">
+                        Start On Stage (OS)
+                      </div>
+                      <div
+                        className="border border-dashed border-gray-300 rounded p-2 min-h-[52px]"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={async () => {
+                          if (!draggingSideStudent) return;
+                          const next = sideItems.map((item) =>
+                            item.student_id === draggingSideStudent
+                              ? { ...item, start_side: "OS" as StageSide }
+                              : item
+                          );
+                          if (subparts.length > 0) {
+                            await persistOrder(next);
+                          } else {
+                            await persistPartSides(next);
+                          }
+                          setDraggingSideStudent(null);
+                          setDraggingSideMeta(null);
+                        }}
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          {uniqueSideList(
+                            sideItems.filter((item) => (item.start_side || DEFAULT_SIDE) === "OS")
+                          ).map((item, idx) => {
+                            const active = positionedStudents.has(item.student_id);
+                            return (
+                              <span
+                                  key={`os-start-${item.student_id}-${idx}`}
+                                  draggable
+                                  onDragStart={() => {
+                                    setDraggingSideStudent(item.student_id);
+                                    setDraggingSideMeta({ student_id: item.student_id, field: "start_side", side: "OS" });
+                                  }}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] border cursor-move ${
+                                    active
+                                      ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                      : "bg-gray-100 text-gray-700 border-gray-300"
+                                  }`}
+                                >
+                                  {idx + 1}. {item.student_name}
+                                </span>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold text-gray-700 mb-1">
+                        End On Stage (OS)
+                      </div>
+                      <div
+                        className="border border-dashed border-gray-300 rounded p-2 min-h-[52px]"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={async () => {
+                          if (!draggingSideStudent) return;
+                          const next = sideItems.map((item) =>
+                            item.student_id === draggingSideStudent
+                              ? { ...item, end_side: "OS" as StageSide }
+                              : item
+                          );
+                          if (subparts.length > 0) {
+                            await persistOrder(next);
+                          } else {
+                            await persistPartSides(next);
+                          }
+                          setDraggingSideStudent(null);
+                          setDraggingSideMeta(null);
+                        }}
+                      >
+                        <div className="flex flex-wrap gap-2">
+                          {uniqueSideList(
+                            sideItems.filter((item) => (item.end_side || DEFAULT_SIDE) === "OS")
+                          ).map((item, idx) => {
+                            const active = positionedStudents.has(item.student_id);
+                            return (
+                              <span
+                                  key={`os-end-${item.student_id}-${idx}`}
+                                  draggable
+                                  onDragStart={() => {
+                                    setDraggingSideStudent(item.student_id);
+                                    setDraggingSideMeta({ student_id: item.student_id, field: "end_side", side: "OS" });
+                                  }}
+                                  className={`px-2 py-0.5 rounded-full text-[10px] border cursor-move ${
+                                    active
+                                      ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                      : "bg-gray-100 text-gray-700 border-gray-300"
+                                  }`}
+                                >
+                                  {idx + 1}. {item.student_name}
+                                </span>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div
                   className="border-2 border-gray-400 bg-gradient-to-b from-amber-100 to-amber-50 relative mx-auto"
                   style={{
@@ -1451,6 +2148,93 @@ export function PositioningPanel({
                   })}
                 </div>
               </div>
+
+              {/* Stage Left (right of grid) */}
+              <div className="space-y-3 w-48">
+                {(["start_side", "end_side"] as const).map((field) => (
+                  <div key={`sl-${field}`} className="bg-white border border-gray-200 rounded p-2">
+                    <div className="text-[11px] font-semibold text-gray-700 mb-1">
+                      Stage Left {field === "start_side" ? "Start" : "End"}
+                    </div>
+                    <div
+                      className="border border-dashed border-gray-300 rounded p-2 min-h-[64px]"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={async () => {
+                        if (!draggingSideStudent) return;
+                        const next = sideItems.map((item) =>
+                          item.student_id === draggingSideStudent
+                            ? { ...item, [field]: "SL" as StageSide }
+                            : item
+                        );
+                        if (subparts.length > 0) {
+                          await persistOrder(next);
+                        } else {
+                          await persistPartSides(next);
+                        }
+                        setDraggingSideStudent(null);
+                        setDraggingSideMeta(null);
+                      }}
+                    >
+                      <div className="flex flex-wrap gap-2">
+                        {uniqueSideList(
+                          sideItems.filter((item) => (item[field] || DEFAULT_SIDE) === "SL")
+                        ).map((item, idx) => {
+                          const active = positionedStudents.has(item.student_id);
+                          return (
+                            <span
+                                key={`sl-${field}-${item.student_id}-${idx}`}
+                                draggable
+                                onDragStart={() => {
+                                  setDraggingSideStudent(item.student_id);
+                                  setDraggingSideMeta({ student_id: item.student_id, field, side: "SL" });
+                                }}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={async () => {
+                                  if (!draggingSideMeta) return;
+                                    if (draggingSideMeta.field === field && draggingSideMeta.side === "SL") {
+                                      const list = uniqueSideList(
+                                        sideItems.filter((row) => (row[field] || DEFAULT_SIDE) === "SL")
+                                      );
+                                      const ids = list.map((entry) => entry.student_id);
+                                      const from = ids.indexOf(draggingSideMeta.student_id);
+                                      const to = ids.indexOf(item.student_id);
+                                      if (from < 0 || to < 0 || from === to) return;
+                                      const reordered = [...list];
+                                    const [moved] = reordered.splice(from, 1);
+                                    reordered.splice(to, 0, moved);
+                                    const orderMap = new Map(
+                                      reordered.map((entry, index) => [entry.student_id, index])
+                                    );
+                                    const next = sideItems.slice().sort((a, b) => {
+                                      const aIdx = orderMap.get(a.student_id);
+                                      const bIdx = orderMap.get(b.student_id);
+                                      if (aIdx === undefined || bIdx === undefined) return 0;
+                                      return aIdx - bIdx;
+                                    });
+                                    if (subparts.length > 0) {
+                                      await persistOrder(next);
+                                    } else {
+                                      await persistPartSides(next);
+                                    }
+                                    setDraggingSideMeta(null);
+                                  }
+                                }}
+                                className={`px-2 py-0.5 rounded-full text-[10px] border cursor-move ${
+                                  active
+                                    ? "bg-emerald-100 text-emerald-700 border-emerald-300"
+                                    : "bg-gray-100 text-gray-700 border-gray-300"
+                                }`}
+                              >
+                                {idx + 1}. {item.student_name}
+                              </span>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {orderedSubparts.length > 0 && canPosition && (
                 <button
                   onClick={() => {
@@ -1466,6 +2250,136 @@ export function PositioningPanel({
             </div>
 
             {canOrder && selectedSubpartId && null}
+
+            {/* Equipment Panel */}
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <h4 className="font-semibold text-gray-900">Equipment</h4>
+                <div className="ml-auto flex items-center gap-2">
+                  <input
+                    value={newEquipmentName}
+                    onChange={(e) => setNewEquipmentName(e.target.value)}
+                    placeholder="Add equipment"
+                    className="px-2 py-1 border border-gray-300 rounded text-xs"
+                  />
+                  <button
+                    onClick={handleAddEquipment}
+                    className="px-2 py-1 bg-gray-900 text-white rounded text-xs"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div className="text-[11px] text-gray-500 mb-3">
+                Active equipment shows at the top. Start side follows the previous active end. Set an initial side for first use.
+              </div>
+              {equipmentLoading ? (
+                <div className="text-xs text-gray-500">Loading equipment…</div>
+              ) : equipmentDisplay.length === 0 ? (
+                <div className="text-xs text-gray-500">No equipment yet.</div>
+              ) : (
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                  {equipmentDisplay.map((item) => {
+                    const selectedStudent = equipmentStudentDraft[item.equipment.id] || "";
+                    const selectedStudentName = rosterById.get(selectedStudent) || "";
+                    const sameName = selectedStudentName && selectedStudentName === item.equipment.name;
+                    return (
+                      <div
+                        key={item.equipment.id}
+                        className={`border rounded-lg p-3 ${item.isActive ? "border-emerald-300 bg-emerald-50" : "border-gray-200"}`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            value={item.equipment.name}
+                            onChange={(e) =>
+                              setEquipmentItems((prev) =>
+                                prev.map((eq) => (eq.id === item.equipment.id ? { ...eq, name: e.target.value } : eq))
+                              )
+                            }
+                            onBlur={() =>
+                              handleUpdateEquipment(item.equipment.id, { name: item.equipment.name })
+                            }
+                            className="px-2 py-1 border border-gray-300 rounded text-xs flex-1"
+                          />
+                          <select
+                            value={selectedStudent}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setEquipmentStudentDraft((prev) => ({
+                                ...prev,
+                                [item.equipment.id]: value,
+                              }));
+                              if (item.isActive && value) {
+                                void saveEquipmentUsage(item.equipment.id, value);
+                              }
+                            }}
+                            className="px-2 py-1 border border-gray-300 rounded text-xs"
+                          >
+                            <option value="">Select performer</option>
+                            {roster.map((student) => (
+                              <option key={student.student_id} value={student.student_id}>
+                                {student.name}
+                              </option>
+                            ))}
+                          </select>
+                          <label className="text-xs text-gray-700 flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={item.isActive}
+                              onChange={(e) => handleToggleEquipmentActive(item.equipment.id, e.target.checked)}
+                              className="h-3 w-3"
+                            />
+                            Active
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] text-gray-600">
+                          <span className="font-semibold text-gray-700">Start:</span>{" "}
+                          <span>{item.startSide || "Unset"}</span>
+                          <span className="font-semibold text-gray-700">End:</span>{" "}
+                          <span>{item.endSide || "—"}</span>
+                          {item.activeStudentName && (
+                            <span className="ml-auto text-[10px] text-gray-500">
+                              Using: {item.activeStudentName}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <span className="text-[10px] text-gray-500">Initial side:</span>
+                          {(["OS", "SL", "SR"] as StageSide[]).map((side) => (
+                            <button
+                              key={`${item.equipment.id}-${side}`}
+                              type="button"
+                              onClick={() => handleUpdateEquipment(item.equipment.id, { initial_side: side })}
+                              className={`px-2 py-0.5 rounded-full text-[10px] border ${
+                                (item.equipment.initial_side || "") === side
+                                  ? "bg-gray-900 text-white border-gray-900"
+                                  : "bg-white text-gray-700 border-gray-300"
+                              }`}
+                            >
+                              {side}
+                            </button>
+                          ))}
+                          {selectedStudent && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateEquipment(item.equipment.id, { name: selectedStudentName })}
+                              className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-600"
+                            >
+                              Use performer name
+                            </button>
+                          )}
+                        </div>
+                        {sameName && (
+                          <div className="text-[10px] text-amber-600 mt-1">
+                            Equipment name matches performer. Consider renaming.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Positioned Students List */}
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">

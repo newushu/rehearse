@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("subpart_order")
       .select(
-        "id, subpart_id, student_id, order, created_at, updated_at, students:student_id(id, name, email)"
+        "id, subpart_id, student_id, order, start_side, end_side, created_at, updated_at, students:student_id(id, name, email)"
       )
       .eq("subpart_id", subpartId)
       .order("order", { ascending: true });
@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
       student_id: row.student_id,
       order: row.order,
       student_name: row.students?.name || "Unknown",
+      start_side: row.start_side ?? null,
+      end_side: row.end_side ?? null,
     }));
 
     return NextResponse.json(normalized);
@@ -71,6 +73,8 @@ export async function POST(request: NextRequest) {
       subpart_id: item.subpart_id,
       student_id: item.student_id,
       order: item.order ?? 0,
+      start_side: item.start_side ?? null,
+      end_side: item.end_side ?? null,
       updated_at: new Date().toISOString(),
     }));
 

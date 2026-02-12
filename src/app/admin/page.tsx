@@ -84,6 +84,9 @@ export default function AdminDashboard() {
           <p className="text-gray-600">
             Manage performances, rehearsals, parts, and stage positioning
           </p>
+          <div className="md:hidden mt-3 text-[11px] text-gray-500">
+            Tip: Rotate your phone for a better view.
+          </div>
         </div>
 
         {/* Menu Tabs */}

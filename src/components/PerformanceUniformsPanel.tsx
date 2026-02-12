@@ -36,23 +36,36 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
   const [loading, setLoading] = useState(true);
   const [assignCodeByRow, setAssignCodeByRow] = useState<Record<string, string>>({});
   const [historyStudent, setHistoryStudent] = useState<RosterEntry | null>(null);
+  const [performanceMeta, setPerformanceMeta] = useState<Record<string, { title: string; date?: string | null }>>({});
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [typesRes, itemsRes, rosterRes] = await Promise.all([
+      const [typesRes, itemsRes, rosterRes, perfsRes] = await Promise.all([
         fetch("/api/uniform-types"),
         fetch("/api/uniform-items"),
         fetch(`/api/performances/${performanceId}/roster`),
+        fetch("/api/performances"),
       ]);
-      const [typesData, itemsData, rosterData] = await Promise.all([
+      const [typesData, itemsData, rosterData, perfsData] = await Promise.all([
         typesRes.ok ? typesRes.json() : [],
         itemsRes.ok ? itemsRes.json() : [],
         rosterRes.ok ? rosterRes.json() : [],
+        perfsRes.ok ? perfsRes.json() : [],
       ]);
       setTypes(typesData || []);
       setItems(itemsData || []);
       setRoster(rosterData || []);
+      const metaMap: Record<string, { title: string; date?: string | null }> = {};
+      (perfsData || []).forEach((perf: any) => {
+        if (perf?.id) {
+          metaMap[perf.id] = {
+            title: perf.title || perf.name || perf.id,
+            date: perf.date || null,
+          };
+        }
+      });
+      setPerformanceMeta(metaMap);
     } finally {
       setLoading(false);
     }
@@ -93,6 +106,55 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
     });
     return map;
   }, [types]);
+
+  const currentPerformanceTime = useMemo(() => {
+    const date = performanceMeta[performanceId]?.date;
+    if (!date) return null;
+    const time = new Date(date).getTime();
+    return Number.isFinite(time) ? time : null;
+  }, [performanceId, performanceMeta]);
+
+  const getPerformanceTime = (perfId: string | null) => {
+    if (!perfId) return null;
+    const date = performanceMeta[perfId]?.date;
+    if (!date) return null;
+    const time = new Date(date).getTime();
+    return Number.isFinite(time) ? time : null;
+  };
+
+  const getPerformanceLabel = (perfId: string | null) => {
+    if (!perfId) return "Unknown performance";
+    return performanceMeta[perfId]?.title || perfId;
+  };
+
+  const getNextUse = (item: UniformItem | null, studentId: string) => {
+    if (!item) return null;
+    const baseTime = currentPerformanceTime ?? Date.now();
+    const list = (item.uniform_assignments || [])
+      .filter((assign) => !assign.returned_at && assign.performance_id)
+      .map((assign) => ({
+        assign,
+        time: getPerformanceTime(assign.performance_id || null),
+      }))
+      .filter((entry) => entry.time !== null && (entry.time as number) > baseTime)
+      .sort((a, b) => (a.time as number) - (b.time as number));
+    if (list.length === 0) return null;
+    return list[0].assign;
+  };
+
+  const holdingByStudent = useMemo(() => {
+    const map: Record<string, UniformItem[]> = {};
+    items.forEach((item) => {
+      const active = (item.uniform_assignments || []).find(
+        (assign) => assign.distributed_at && !assign.returned_at && assign.student_id
+      );
+      if (active?.student_id) {
+        map[active.student_id] = map[active.student_id] || [];
+        map[active.student_id].push(item);
+      }
+    });
+    return map;
+  }, [items]);
 
   const getActiveAssignment = (item?: UniformItem | null) => {
     if (!item) return null;
@@ -382,10 +444,11 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="grid grid-cols-5 gap-0 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-200">
+        <div className="grid grid-cols-6 gap-0 text-xs font-semibold uppercase tracking-wide text-gray-500 bg-gray-50 border-b border-gray-200">
           <div className="px-3 py-2">Student</div>
           <div className="px-3 py-2">Assigned</div>
           <div className="px-3 py-2">Status</div>
+          <div className="px-3 py-2">Next Use</div>
           <div className="px-3 py-2">Given</div>
           <div className="px-3 py-2">Returned</div>
         </div>
@@ -445,14 +508,33 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
               : isGiven
                 ? "bg-gray-700 text-white border-gray-700"
                 : "bg-amber-100 text-amber-700 border-amber-300";
+          const nextUse = getNextUse(assignedItem, row.student_id);
+          const nextUseSameStudent = Boolean(nextUse && nextUse.student_id === row.student_id);
+          const nextUseDate = nextUse?.performance_id
+            ? performanceMeta[nextUse.performance_id]?.date || null
+            : null;
+          const nextUseLabel = nextUse
+            ? nextUseSameStudent
+              ? `${row.name} is assigned for ${getPerformanceLabel(nextUse.performance_id || null)}${
+                  nextUseDate ? ` (${formatDisplayDateTime(nextUseDate, DEFAULT_TIMEZONE)})` : ""
+                } coming up.`
+              : `Warning: ${getPerformanceLabel(nextUse.performance_id || null)}${
+                  nextUseDate ? ` (${formatDisplayDateTime(nextUseDate, DEFAULT_TIMEZONE)})` : ""
+                } needs this uniform for ${nextUse.student_name || "another student"}.`
+            : "—";
 
           return (
             <div
               key={row.signup_id}
-              className="grid grid-cols-5 gap-0 border-b border-gray-200 last:border-b-0 text-sm"
+              className="grid grid-cols-6 gap-0 border-b border-gray-200 last:border-b-0 text-sm"
             >
               <div className="px-3 py-3 font-semibold text-gray-900 flex items-center gap-2">
                 <span>{row.name}</span>
+                {!nextUseSameStudent && nextUse && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-700 text-xs font-bold">
+                    !
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setHistoryStudent(row)}
@@ -507,6 +589,15 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                   </div>
                 ) : (
                   <div className="w-full">
+                    {holdingByStudent[row.student_id]?.length ? (
+                      <div className="mb-2 text-[11px] text-amber-700">
+                        Currently holding:{" "}
+                        {holdingByStudent[row.student_id].map((item) => {
+                          const typeName = typeById[item.uniform_type_id]?.name || "Uniform";
+                          return `${typeName} #${item.item_number}`;
+                        }).join(", ")}
+                      </div>
+                    ) : null}
                     <input
                       value={assignCodeByRow[row.signup_id] || ""}
                       onChange={(e) =>
@@ -516,7 +607,13 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                         }))
                       }
                       list={`uniform-options-${row.signup_id}`}
-                      placeholder="Drop uniform here or type code"
+                      placeholder={
+                        holdingByStudent[row.student_id]?.length
+                          ? `Currently holding: ${holdingByStudent[row.student_id]
+                              .map((item) => item.item_number)
+                              .join(", ")}`
+                          : "Drop uniform here or type code"
+                      }
                       className="w-full px-2 py-1 border border-dashed border-gray-300 rounded text-xs text-gray-700"
                     />
                     <datalist id={`uniform-options-${row.signup_id}`}>
@@ -569,6 +666,17 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                 </div>
                 {statusDetail && <div className="text-[10px] text-gray-500">{statusDetail}</div>}
               </div>
+              <div className="px-3 py-3 text-[11px] text-gray-700">
+                <div
+                  className={
+                    nextUse && !nextUseSameStudent
+                      ? "border border-red-300 bg-red-50 text-red-700 rounded px-2 py-1"
+                      : ""
+                  }
+                >
+                  {nextUseLabel}
+                </div>
+              </div>
               <div className="px-3 py-3">
                 <button
                   onClick={() => assignedItem && handleGive(row, assignedItem)}
@@ -585,7 +693,7 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                   {isGiven ? "Given" : `Give to ${row.name}`}
                 </button>
               </div>
-              <div className="px-3 py-3">
+              <div className="px-3 py-3 flex items-center gap-2">
                 <button
                   onClick={() => assignedItem && handleReturn(assignedItem)}
                   disabled={!assignedItem || !activePerf || !activePerf.distributed_at}
@@ -593,6 +701,11 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                 >
                   {isReturned ? "Returned ✓" : "Not Returned"}
                 </button>
+                {!isReturned && nextUse && !nextUseSameStudent && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">
+                    !
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -630,7 +743,7 @@ export function PerformanceUniformsPanel({ performanceId }: PerformanceUniformsP
                           <div key={assignment.id} className="text-xs text-gray-600">
                             {assignment.performance_id && (
                               <div>
-                                Performance: {assignment.performance_id === performanceId ? "This performance" : assignment.performance_id}
+                                Performance: {performanceMeta[assignment.performance_id]?.title || assignment.performance_id}
                               </div>
                             )}
                             <div>
