@@ -535,7 +535,7 @@ function MySignups({}: MySignupsProps) {
       ) : (
         <div className="space-y-4">
           {signups.map((signup) => (
-            <SignupCard key={signup.id} signup={signup} studentName={studentName} />
+            <SignupCard key={signup.id} signup={signup} />
           ))}
         </div>
       )}
@@ -545,10 +545,9 @@ function MySignups({}: MySignupsProps) {
 
 interface SignupCardProps {
   signup: any;
-  studentName: string;
 }
 
-function SignupCard({ signup, studentName }: SignupCardProps) {
+function SignupCard({ signup }: SignupCardProps) {
   const [positioning, setPositioning] = useState<any[]>([]);
   const [loadingPos, setLoadingPos] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -566,17 +565,18 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
   const musicUrl = signup.performance?.music_file_path
     ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/performance-music/${signup.performance.music_file_path}`
     : "";
+  const displayStudentName = signup.student_name || "Student";
 
-  const formatTimepoint = (value: number | string | null | undefined) => {
+  const formatTimepoint = useCallback((value: number | string | null | undefined) => {
     if (value === null || value === undefined) return null;
     const numeric = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(numeric)) return null;
     const minutes = Math.floor(numeric / 60);
     const seconds = Math.floor(numeric % 60);
     return `${minutes}:${String(seconds).padStart(2, "0")}`;
-  };
+  }, []);
 
-  const formatTimeRange = (
+  const formatTimeRange = useCallback((
     start: number | string | null | undefined,
     end: number | string | null | undefined
   ) => {
@@ -585,7 +585,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     if (!startLabel && !endLabel) return null;
     if (startLabel && endLabel) return `${startLabel} - ${endLabel}`;
     return startLabel || endLabel;
-  };
+  }, [formatTimepoint]);
 
   const formatDateWithWeekday = (dateValue?: string | null) => {
     if (!dateValue) return "Date TBD";
@@ -793,7 +793,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                 : "";
               if (next.assignment.student_id === signup.student_id) {
                 setUniformNextUseLabel(
-                  `${studentName} is assigned for ${title}${dateLabel ? ` (${dateLabel})` : ""} coming up.`
+                  `${displayStudentName} is assigned for ${title}${dateLabel ? ` (${dateLabel})` : ""} coming up.`
                 );
               } else {
                 setUniformNextUseLabel(
@@ -913,12 +913,13 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     signup.performance?.timezone,
     signup.performance_id,
     signup.student_id,
-    studentName,
+    displayStudentName,
   ]);
 
   useEffect(() => {
+    if (!expanded && !showPositioningView) return;
     fetchPositioning();
-  }, [fetchPositioning]);
+  }, [expanded, showPositioningView, fetchPositioning]);
 
   if (showPositioningView) {
     return (
@@ -940,7 +941,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
           <StudentPositioningView
             performanceId={signup.performance_id}
             studentId={signup.student_id}
-            studentName={studentName}
+            studentName={displayStudentName}
           />
         </div>
       </div>
@@ -1031,7 +1032,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
                 <div>
                   <div className="text-[11px] text-gray-500 uppercase">Name</div>
-                  <div className="font-medium text-gray-900">{studentName || "Student"}</div>
+                  <div className="font-medium text-gray-900">{displayStudentName}</div>
                 </div>
                 <div>
                   <div className="text-[11px] text-gray-500 uppercase">Uniform</div>

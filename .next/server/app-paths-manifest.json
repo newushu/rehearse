@@ -1,8 +1,13 @@
 {
   "/api/app-logo/route": "app/api/app-logo/route.js",
-  "/api/stage-positions/route": "app/api/stage-positions/route.js",
+  "/api/performances/route": "app/api/performances/route.js",
+  "/api/students/route": "app/api/students/route.js",
+  "/api/signups/route": "app/api/signups/route.js",
+  "/api/performances/[id]/route": "app/api/performances/[id]/route.js",
   "/api/rehearse-notes/route": "app/api/rehearse-notes/route.js",
+  "/api/stage-positions/route": "app/api/stage-positions/route.js",
   "/api/subparts/route": "app/api/subparts/route.js",
-  "/api/part-sides/route": "app/api/part-sides/route.js",
-  "/admin/performances/[id]/page": "app/admin/performances/[id]/page.js"
+  "/api/uniform-student/route": "app/api/uniform-student/route.js",
+  "/page": "app/page.js",
+  "/signup/page": "app/signup/page.js"
 }
