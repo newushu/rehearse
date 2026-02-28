@@ -159,7 +159,7 @@ export function PartsList({
       const data = await res.json();
       setSubpartsMap((prev) => ({
         ...prev,
-        [partId]: data || [],
+        [partId]: orderSubpartsByTime(data || []),
       }));
     } catch (error) {
       console.error("Error fetching subparts:", error);
@@ -173,18 +173,46 @@ export function PartsList({
     const timepointEnd = composeSeconds(newSubpartTimepointEndMin[partId] || "", newSubpartTimepointEndSec[partId] || "");
     if (!title) return;
     try {
-      const res = await fetch("/api/subparts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          part_id: partId,
-          title,
-          description: description || null,
-          mode: "position",
-          timepoint_seconds: timepointSeconds,
-          timepoint_end_seconds: timepointEnd,
-        }),
-      });
+      const payload = {
+        part_id: partId,
+        title,
+        description: description || null,
+        mode: "position",
+        timepoint_seconds: timepointSeconds,
+        timepoint_end_seconds: timepointEnd,
+      };
+      let res: Response | null = null;
+      let lastErr: unknown = null;
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        try {
+          res = await fetch("/api/subparts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 700));
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      if (!res) {
+        throw new Error(
+          lastErr instanceof Error
+            ? `Request timed out. Please try again. (${lastErr.message})`
+            : "Request timed out. Please try again."
+        );
+      }
+
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.details || data?.error || "Failed to create subpart");
@@ -198,6 +226,7 @@ export function PartsList({
       setNewSubpartTimepointEndSec((prev) => ({ ...prev, [partId]: "" }));
     } catch (error) {
       console.error("Error creating subpart:", error);
+      alert(error instanceof Error ? error.message : "Failed to create subpart");
     }
   };
 
@@ -263,7 +292,7 @@ export function PartsList({
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
 
-    setSubpartsMap((prev) => ({ ...prev, [partId]: next }));
+    setSubpartsMap((prev) => ({ ...prev, [partId]: orderSubpartsByTime(next) }));
 
     try {
       await Promise.all(

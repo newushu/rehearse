@@ -4,15 +4,30 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   try {
     const partId = request.nextUrl.searchParams.get("partId");
-    if (!partId) {
-      return NextResponse.json({ error: "partId query parameter is required" }, { status: 400 });
+    const partIdsParam = request.nextUrl.searchParams.get("partIds");
+    const partIds = (partIdsParam || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (!partId && partIds.length === 0) {
+      return NextResponse.json(
+        { error: "partId or partIds query parameter is required" },
+        { status: 400 }
+      );
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("part_sides")
       .select("id, part_id, student_id, start_side, end_side, students:student_id(id,name,email)")
-      .eq("part_id", partId)
       .order("student_id", { ascending: true });
+
+    if (partId) {
+      query = query.eq("part_id", partId);
+    } else {
+      query = query.in("part_id", partIds);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 

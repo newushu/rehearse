@@ -1,13 +1,17 @@
 import { supabase } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
+const READ_CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300",
+};
+
 // GET parts for a performance
 export async function GET(request: NextRequest) {
   try {
     const performanceId = request.nextUrl.searchParams.get("performanceId");
 
     if (!performanceId) {
-      return NextResponse.json([]);
+      return NextResponse.json([], { headers: READ_CACHE_HEADERS });
     }
 
     const { data, error } = await supabase
@@ -18,7 +22,7 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json(data);
+    return NextResponse.json(data, { headers: READ_CACHE_HEADERS });
   } catch (error) {
     console.error("Error fetching parts:", error);
     return NextResponse.json(

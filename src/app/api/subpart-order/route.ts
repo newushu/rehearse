@@ -5,20 +5,33 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   try {
     const subpartId = request.nextUrl.searchParams.get("subpartId");
-    if (!subpartId) {
+    const subpartIdsParam = request.nextUrl.searchParams.get("subpartIds");
+    const subpartIds = (subpartIdsParam || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    if (!subpartId && subpartIds.length === 0) {
       return NextResponse.json(
-        { error: "subpartId query parameter is required" },
+        { error: "subpartId or subpartIds query parameter is required" },
         { status: 400 }
       );
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("subpart_order")
       .select(
         "id, subpart_id, student_id, order, start_side, end_side, created_at, updated_at, students:student_id(id, name, email)"
       )
-      .eq("subpart_id", subpartId)
       .order("order", { ascending: true });
+
+    if (subpartId) {
+      query = query.eq("subpart_id", subpartId);
+    } else {
+      query = query.in("subpart_id", subpartIds);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 

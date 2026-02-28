@@ -262,6 +262,14 @@ return (
                       )}
                     </div>
                   </div>
+                  <div>
+                    <div className="text-sm text-gray-500">Call Time</div>
+                    <div className="font-semibold text-gray-900">
+                      {performanceDetails.call_time
+                        ? `${formatTimeString(performanceDetails.call_time)} ET`
+                        : "N/A"}
+                    </div>
+                  </div>
 
                   <div>
                     <div className="text-sm text-gray-500">Location</div>
@@ -305,12 +313,10 @@ return (
                                   : "bg-gray-100 text-gray-500 border-gray-200"
                               }`}
                             >
-                              {reh.date
-                                ? formatDisplayDateTimeWithWeekday(
-                                    reh.date,
-                                    performanceDetails.timezone || "America/New_York"
-                                  )
-                                : "Date TBD"}
+                              {formatDisplayDateTimeWithWeekday(
+                                reh.date,
+                                performanceDetails.timezone || "America/New_York"
+                              )}
                               {reh.time ? ` • ${formatTimeString(reh.time)} ET` : ""}
                               {reh.location ? ` • ${reh.location}` : ""}
                             </span>
@@ -393,25 +399,13 @@ function MySignups({}: MySignupsProps) {
         return;
       }
 
-      const signupsData = (
-        await Promise.all(
-          studentsToUse.map(async (student: any) => {
-            const signupsRes = await fetch(`/api/signups?studentId=${student.id}`);
-            const data = await signupsRes.json();
-            return data || [];
-          })
-        )
-      ).flat();
-
-      const enriched = await Promise.all(
-        signupsData.map(async (signup: any) => {
-          const perfRes = await fetch(`/api/performances/${signup.performance_id}`);
-          const perf = await perfRes.json();
-          return { ...signup, performance: perf };
-        })
+      const studentIdsParam = studentsToUse.map((s: any) => s.id).join(",");
+      const signupsRes = await fetch(
+        `/api/signups?studentIds=${encodeURIComponent(studentIdsParam)}&includePerformance=1`
       );
-
-      setSignups(enriched);
+      if (!signupsRes.ok) throw new Error("Failed to fetch signups");
+      const signupsData = await signupsRes.json();
+      setSignups(Array.isArray(signupsData) ? signupsData : []);
       setActiveStudentNames(studentsToUse.map((s: any) => s.name));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch signups");
@@ -446,12 +440,6 @@ function MySignups({}: MySignupsProps) {
       setSelectedStudentId(matches[0].id);
     }
   }, [studentName, allStudents]);
-
-  useEffect(() => {
-    if (!studentName.trim()) return;
-    if (!searched) setSearched(true);
-    loadSignups();
-  }, [searched, studentName, selectedStudentId, showAllMatches, loadSignups]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -501,7 +489,6 @@ function MySignups({}: MySignupsProps) {
                 }`}
                 onClick={() => {
                   setSelectedStudentId(student.id);
-                  setSearched(true);
                 }}
               >
                 {student.name}
@@ -600,6 +587,20 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
     return startLabel || endLabel;
   };
 
+  const formatDateWithWeekday = (dateValue?: string | null) => {
+    if (!dateValue) return "Date TBD";
+    const [y, m, d] = dateValue.split("-").map((val) => parseInt(val, 10));
+    if (!y || !m || !d) return dateValue;
+    const date = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    return date.toLocaleDateString(undefined, {
+      timeZone: "UTC",
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
   const parseTimeStart = (value: string | null | undefined) => {
     if (!value) return null;
     const trimmed = value.split("-")[0].trim();
@@ -632,6 +633,13 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
         return;
       }
 
+      const partIds = (perf.parts || []).map((part: any) => part.id).filter(Boolean);
+      const [notesRes, subpartsRes, positionsRes] = await Promise.all([
+        fetch(`/api/rehearse-notes?performanceId=${signup.performance_id}`),
+        fetch(`/api/subparts?partIds=${encodeURIComponent(partIds.join(","))}`),
+        fetch(`/api/stage-positions?partIds=${encodeURIComponent(partIds.join(","))}`),
+      ]);
+
       const partMatch = signup.part_id
         ? (perf.parts || []).find((part: any) => part.id === signup.part_id)
         : null;
@@ -641,29 +649,63 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
         : null;
       let subpartLabel: string | null = null;
 
-      let noteLookup: Array<{ part_id: string; subpart_id: string | null; note: string }> = [];
-      try {
-        const notesRes = await fetch(`/api/rehearse-notes?performanceId=${signup.performance_id}`);
-        const notes = await notesRes.json();
-        if (Array.isArray(notes)) {
-          noteLookup = notes.map((item: any) => ({
-            part_id: item.part_id,
-            subpart_id: item.subpart_id ?? null,
-            note: item.note,
-          }));
-        }
-      } catch (noteErr) {
-        console.warn("Failed to load rehearse notes:", noteErr);
-      }
+      const noteLookup: Array<{ part_id: string; subpart_id: string | null; note: string }> =
+        notesRes.ok
+          ? ((await notesRes.json()) || []).map((item: any) => ({
+              part_id: item.part_id,
+              subpart_id: item.subpart_id ?? null,
+              note: item.note,
+            }))
+          : [];
+
+      const subpartsRaw = subpartsRes.ok ? await subpartsRes.json() : [];
+      const subpartsByPart = (Array.isArray(subpartsRaw) ? subpartsRaw : []).reduce(
+        (acc: Record<string, any[]>, sub: any) => {
+          if (!sub?.part_id) return acc;
+          if (!acc[sub.part_id]) acc[sub.part_id] = [];
+          acc[sub.part_id].push(sub);
+          return acc;
+        },
+        {}
+      );
+
+      const stagePositionsRaw = positionsRes.ok ? await positionsRes.json() : [];
+      const positionsByPart = (Array.isArray(stagePositionsRaw) ? stagePositionsRaw : []).reduce(
+        (acc: Record<string, any[]>, pos: any) => {
+          if (!pos?.part_id) return acc;
+          if (!acc[pos.part_id]) acc[pos.part_id] = [];
+          acc[pos.part_id].push(pos);
+          return acc;
+        },
+        {}
+      );
+
+      const subpartIds = (Array.isArray(subpartsRaw) ? subpartsRaw : [])
+        .map((sub: any) => sub.id)
+        .filter(Boolean);
+      const subpartOrderRaw =
+        subpartIds.length > 0
+          ? await fetch(
+              `/api/subpart-order?subpartIds=${encodeURIComponent(subpartIds.join(","))}`
+            ).then((res) => (res.ok ? res.json() : []))
+          : [];
+      const subpartOrderBySubpart = (Array.isArray(subpartOrderRaw)
+        ? subpartOrderRaw
+        : []
+      ).reduce((acc: Record<string, any[]>, item: any) => {
+        const key = item?.subpart_id;
+        if (!key) return acc;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(item);
+        return acc;
+      }, {});
 
       if (partMatch) {
         if (partMatch.description) setAssignedPartDescription(partMatch.description);
-        const subRes = await fetch(`/api/subparts?partId=${partMatch.id}`);
-        const subparts = await subRes.json();
+        const subparts = subpartsByPart[partMatch.id] || [];
         if (Array.isArray(subparts) && subparts.length > 0) {
           for (const sub of subparts) {
-            const orderRes = await fetch(`/api/subpart-order?subpartId=${sub.id}`);
-            const order = await orderRes.json();
+            const order = subpartOrderBySubpart[sub.id] || [];
             const matches = Array.isArray(order)
               ? order.some((item: any) => item.student_id === signup.student_id)
               : false;
@@ -770,12 +812,10 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
 
       const resolveSubpartTimeForStudent = async (partId: string) => {
         try {
-          const subRes = await fetch(`/api/subparts?partId=${partId}`);
-          const subparts = await subRes.json();
+          const subparts = subpartsByPart[partId] || [];
           if (!Array.isArray(subparts) || subparts.length === 0) return null;
           for (const sub of subparts) {
-            const orderRes = await fetch(`/api/subpart-order?subpartId=${sub.id}`);
-            const order = await orderRes.json();
+            const order = subpartOrderBySubpart[sub.id] || [];
             const matches = Array.isArray(order)
               ? order.some((item: any) => item.student_id === signup.student_id)
               : false;
@@ -797,14 +837,12 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
       // Get positioning for each part
       const posData: any[] = [];
       for (const part of perf.parts) {
-        const posRes = await fetch(`/api/stage-positions?partId=${part.id}`);
-        const positions = await posRes.json();
+        const positions = positionsByPart[part.id] || [];
         const isPositioned = positions.some(
           (p: any) => p.student_id === signup.student_id
         );
         const partTime = formatTimeRange(part.timepoint_seconds, part.timepoint_end_seconds);
-        const subRes = await fetch(`/api/subparts?partId=${part.id}`);
-        const subpartsList = await subRes.json();
+        const subpartsList = subpartsByPart[part.id] || [];
         const orderedSubparts = Array.isArray(subpartsList)
           ? subpartsList
               .slice()
@@ -815,8 +853,18 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                 return (a.title || "").localeCompare(b.title || "");
               })
           : [];
-        const subpartsListLabel = orderedSubparts.length > 0
-          ? orderedSubparts.map((sub: any, index: number) => `${index + 1}) ${sub.title}`).join(", ")
+        const subpartsDetails = orderedSubparts.map((sub: any, index: number) => {
+          const subNote = noteLookup.find(
+            (item) => item.part_id === part.id && item.subpart_id === sub.id
+          );
+          return {
+            label: `${index + 1}) ${sub.title}`,
+            note: subNote?.note || null,
+            description: sub.description || null,
+          };
+        });
+        const subpartsListLabel = subpartsDetails.length > 0
+          ? subpartsDetails.map((item) => item.label).join(", ")
           : null;
         const subpartInfo = await resolveSubpartTimeForStudent(part.id);
         const partStart =
@@ -835,6 +883,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             part_start: partStart,
             subpart_start: subpartInfo?.start ?? null,
             subparts_list: subpartsListLabel,
+            subparts_details: subpartsDetails,
           });
         } else {
           posData.push({
@@ -846,6 +895,7 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
             part_start: partStart,
             subpart_start: subpartInfo?.start ?? null,
             subparts_list: subpartsListLabel,
+            subparts_details: subpartsDetails,
           });
         }
       }
@@ -1029,9 +1079,16 @@ function SignupCard({ signup, studentName }: SignupCardProps) {
                         </span>
                       )}
                     </div>{" "}
-                    {pos.subparts_list && (
-                      <div className="mt-1 text-[10px] text-gray-600">
-                        Subparts: {pos.subparts_list}
+                    {pos.subparts_details && pos.subparts_details.length > 0 && (
+                      <div className="mt-1 text-[10px] text-gray-600 space-y-1">
+                        <div>Subparts: {pos.subparts_list}</div>
+                        {pos.subparts_details.map((detail: any, detailIdx: number) => (
+                          <div key={`${pos.part_name}-sub-${detailIdx}`} className="text-[10px] text-gray-500">
+                            {detail.label}
+                            {detail.note ? ` — Note: ${detail.note}` : ""}
+                            {detail.description ? ` — Notes: ${detail.description}` : ""}
+                          </div>
+                        ))}
                       </div>
                     )}
                     <div className="mt-2 flex flex-wrap gap-2 text-xs">

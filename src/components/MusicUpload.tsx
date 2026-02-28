@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 interface MusicUploadProps {
   performanceId: string;
@@ -20,7 +21,8 @@ export function MusicUpload({
   const [success, setSuccess] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.currentTarget.files?.[0];
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
 
     setLoading(true);
@@ -28,14 +30,31 @@ export function MusicUpload({
     setSuccess(false);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
+      const timestamp = Date.now();
+      const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const filename = `performance-${performanceId}-${timestamp}-${safeFileName}`;
+      const filePath = `music/${filename}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("performance-music")
+        .upload(filePath, file, {
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
 
       const response = await fetch(
         `/api/performances/${performanceId}/upload-music`,
         {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filePath,
+            fileName: file.name,
+          }),
         }
       );
 
@@ -49,7 +68,7 @@ export function MusicUpload({
       onUploadSuccess?.(data.filePath, data.publicUrl);
 
       // Reset input
-      e.currentTarget.value = "";
+      input.value = "";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -78,7 +97,7 @@ export function MusicUpload({
                 {loading ? "Uploading..." : "Click to upload music"}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                MP3, WAV, OGG (max 15MB)
+                MP3, WAV, OGG, WebM (max 15MB)
               </p>
             </div>
           </div>

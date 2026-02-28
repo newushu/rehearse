@@ -168,6 +168,9 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
     const last = partSegments.reduce((max, seg) => Math.max(max, seg.end), 0);
     return Math.max(duration || 0, last, 1);
   }, [partSegments, duration]);
+  const timelineMinWidth = useMemo(() => {
+    return Math.max(640, partSegments.length * 130);
+  }, [partSegments.length]);
 
   const currentIndex = useMemo(() => {
     if (timepointParts.length === 0) return -1;
@@ -1145,73 +1148,76 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
             )}
           </div>
         </div>
-        <div
-          ref={timelineRef}
-          className="relative h-24 rounded bg-slate-50 border border-slate-200 overflow-hidden cursor-pointer"
-          onMouseDown={handleTimelinePointerDown}
-          onMouseMove={handleTimelinePointerMove}
-          onMouseUp={handleTimelinePointerUp}
-          onMouseLeave={handleTimelinePointerUp}
-        >
-          {loopStart !== null && loopEnd !== null && (
-            <div
-              className="absolute top-0 h-full bg-emerald-200/70"
-              style={{
-                left: `${(loopStart / timelineDuration) * 100}%`,
-                width: `${((loopEnd - loopStart) / timelineDuration) * 100}%`,
-              }}
-            />
-          )}
-          <div className="absolute top-0 left-0 right-0 h-14">
-            {partSegments.map((seg, segIdx) => {
-              const left = (seg.start / timelineDuration) * 100;
-              const width = Math.max(1, ((seg.end - seg.start) / timelineDuration) * 100);
-              const isCurrent = currentPart?.id === seg.id;
-              return (
-                <button
-                  key={seg.id}
-                  type="button"
-                  onClick={() => {
-                    if (loopSelectMode) {
-                      setPendingLoopRange({ start: seg.start, end: seg.end });
-                    } else {
-                      seekTo(seg.start, true);
-                    }
-                  }}
-                  className={`absolute top-0 h-full text-base font-semibold px-2 py-1 text-center truncate ${
-                    isCurrent ? "bg-blue-700 text-white" : `${palette[segIdx % palette.length]} text-white`
-                  } ${loopSelectMode && pendingLoopRange?.start === seg.start ? "ring-2 ring-emerald-300" : ""}`}
-                  style={{ left: `${left}%`, width: `${width}%` }}
-                  title={seg.name}
-                >
-                  {seg.name}
-                </button>
-              );
-            })}
-          </div>
-          <div className="absolute bottom-0 left-0 right-0 h-10 border-t border-slate-200 bg-slate-100/80">
-            {subpartSegments.map((seg, idx) => {
-              const left = (seg.start / timelineDuration) * 100;
-              const width = Math.max(1, ((seg.end - seg.start) / timelineDuration) * 100);
-              const borderClass = idx % 2 === 0 ? "border-l border-slate-300" : "border-l border-white/60";
-              return (
-                <button
-                  key={seg.id}
-                  type="button"
-                  onClick={() => seekTo(seg.start, true)}
-                  className={`absolute top-0 h-full text-xs font-semibold px-2 py-1 text-center truncate ${borderClass} ${paletteLight[seg.colorIdx % paletteLight.length]}`}
-                  style={{ left: `${left}%`, width: `${width}%` }}
-                  title={seg.title}
-                >
-                  {seg.title}
-                </button>
-              );
-            })}
-          </div>
+        <div className="overflow-x-auto">
           <div
-            className="absolute top-0 h-full w-[3px] bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]"
-            style={{ left: `${playhead}%` }}
-          />
+            ref={timelineRef}
+            className="relative h-24 rounded bg-slate-50 border border-slate-200 overflow-hidden cursor-pointer"
+            style={{ minWidth: `${timelineMinWidth}px` }}
+            onMouseDown={handleTimelinePointerDown}
+            onMouseMove={handleTimelinePointerMove}
+            onMouseUp={handleTimelinePointerUp}
+            onMouseLeave={handleTimelinePointerUp}
+          >
+            {loopStart !== null && loopEnd !== null && (
+              <div
+                className="absolute top-0 h-full bg-emerald-200/70"
+                style={{
+                  left: `${(loopStart / timelineDuration) * 100}%`,
+                  width: `${((loopEnd - loopStart) / timelineDuration) * 100}%`,
+                }}
+              />
+            )}
+            <div className="absolute top-0 left-0 right-0 h-14">
+              {partSegments.map((seg, segIdx) => {
+                const left = (seg.start / timelineDuration) * 100;
+                const width = Math.max(1, ((seg.end - seg.start) / timelineDuration) * 100);
+                const isCurrent = currentPart?.id === seg.id;
+                return (
+                  <button
+                    key={seg.id}
+                    type="button"
+                    onClick={() => {
+                      if (loopSelectMode) {
+                        setPendingLoopRange({ start: seg.start, end: seg.end });
+                      } else {
+                        seekTo(seg.start, true);
+                      }
+                    }}
+                    className={`absolute top-0 h-full text-base font-semibold px-2 py-1 text-center truncate ${
+                      isCurrent ? "bg-blue-700 text-white" : `${palette[segIdx % palette.length]} text-white`
+                    } ${loopSelectMode && pendingLoopRange?.start === seg.start ? "ring-2 ring-emerald-300" : ""}`}
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                    title={seg.name}
+                  >
+                    {seg.name}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-10 border-t border-slate-200 bg-slate-100/80">
+              {subpartSegments.map((seg, idx) => {
+                const left = (seg.start / timelineDuration) * 100;
+                const width = Math.max(1, ((seg.end - seg.start) / timelineDuration) * 100);
+                const borderClass = idx % 2 === 0 ? "border-l border-slate-300" : "border-l border-white/60";
+                return (
+                  <button
+                    key={seg.id}
+                    type="button"
+                    onClick={() => seekTo(seg.start, true)}
+                    className={`absolute top-0 h-full text-xs font-semibold px-2 py-1 text-center truncate ${borderClass} ${paletteLight[seg.colorIdx % paletteLight.length]}`}
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                    title={seg.title}
+                  >
+                    {seg.title}
+                  </button>
+                );
+              })}
+            </div>
+            <div
+              className="absolute top-0 h-full w-[3px] bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]"
+              style={{ left: `${playhead}%` }}
+            />
+          </div>
         </div>
         {currentPart && (subpartsByPart[currentPart.id] || []).length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -1293,6 +1299,17 @@ export function RehearseOverlay({ performanceId, parts, musicUrl, onClose, onUpd
                 className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800"
               >
                 Close
+              </button>
+            </div>
+          </div>
+          <div className="sticky top-0 z-30 mb-4 flex justify-center">
+            <div className="rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
+              <button
+                onClick={togglePlay}
+                disabled={!musicUrl}
+                className="px-3 py-1 bg-gray-900 text-white rounded text-xs disabled:bg-gray-400"
+              >
+                {isPlaying ? "Pause" : "Play"}
               </button>
             </div>
           </div>

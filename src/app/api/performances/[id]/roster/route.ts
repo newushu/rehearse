@@ -8,8 +8,10 @@ export async function GET(
   try {
     const { id } = await params;
 
+    let hasCreatedAt = true;
     const baseSelect = `
         id,
+        created_at,
         student_id,
         assigned_uniform_item_id,
         students(name, email),
@@ -27,6 +29,7 @@ export async function GET(
         .from("student_signups")
         .select(`
           id,
+          created_at,
           student_id,
           students(name, email),
           part_id,
@@ -37,11 +40,29 @@ export async function GET(
       error = fallback.error;
     }
 
+    if (error) {
+      // Final fallback for legacy schemas that don't expose created_at on student_signups.
+      hasCreatedAt = false;
+      const legacy = await supabase
+        .from("student_signups")
+        .select(`
+          id,
+          student_id,
+          students(name, email),
+          part_id,
+          parts(name)
+        `)
+        .eq("performance_id", id);
+      data = legacy.data as any;
+      error = legacy.error;
+    }
+
     if (error) throw error;
 
     // Transform data to flatten the structure
     const roster = (data || []).map((signup: any) => ({
       signup_id: signup.id,
+      signup_created_at: hasCreatedAt ? signup.created_at || null : null,
       student_id: signup.student_id,
       name: signup.students?.name || "Unknown",
       email: signup.students?.email || "",

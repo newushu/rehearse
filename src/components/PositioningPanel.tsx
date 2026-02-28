@@ -218,48 +218,67 @@ export function PositioningPanel({
       if (!partsRes.ok) return;
       const partsData = await partsRes.json();
       setAllPartsForEquipment(partsData || []);
+      const partIds = (partsData || []).map((part: any) => part.id).filter(Boolean);
+      if (partIds.length === 0) {
+        setAllSubpartsByPart({});
+        setAllPartSides({});
+        setAllSubpartSides({});
+        return;
+      }
 
-      const subpartEntries = await Promise.all(
-        (partsData || []).map(async (part: any) => {
-          const res = await fetch(`/api/subparts?partId=${part.id}`);
-          if (!res.ok) return [part.id, []] as const;
-          const data = await res.json();
-          return [part.id, data || []] as const;
-        })
+      const [subpartsRes, partSidesRes] = await Promise.all([
+        fetch(`/api/subparts?partIds=${encodeURIComponent(partIds.join(","))}`),
+        fetch(`/api/part-sides?partIds=${encodeURIComponent(partIds.join(","))}`),
+      ]);
+
+      const subpartsList = subpartsRes.ok ? await subpartsRes.json() : [];
+      const subpartsMap = (Array.isArray(subpartsList) ? subpartsList : []).reduce(
+        (acc: Record<string, any[]>, subpart: any) => {
+          const key = subpart?.part_id;
+          if (!key) return acc;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(subpart);
+          return acc;
+        },
+        {}
       );
-      const subpartsMap: Record<string, any[]> = {};
-      subpartEntries.forEach(([pid, list]) => {
-        subpartsMap[pid] = list;
-      });
       setAllSubpartsByPart(subpartsMap);
 
-      const partSidesEntries = await Promise.all(
-        (partsData || []).map(async (part: any) => {
-          const res = await fetch(`/api/part-sides?partId=${part.id}`);
-          if (!res.ok) return [part.id, []] as const;
-          const data = await res.json();
-          return [part.id, data || []] as const;
-        })
+      const partSidesList = partSidesRes.ok ? await partSidesRes.json() : [];
+      const partSidesMap = (Array.isArray(partSidesList) ? partSidesList : []).reduce(
+        (acc: Record<string, any[]>, side: any) => {
+          const key = side?.part_id;
+          if (!key) return acc;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(side);
+          return acc;
+        },
+        {}
       );
-      const partSidesMap: Record<string, any[]> = {};
-      partSidesEntries.forEach(([pid, list]) => {
-        partSidesMap[pid] = list;
-      });
       setAllPartSides(partSidesMap);
 
-      const subpartIds = Object.values(subpartsMap).flat().map((sub: any) => sub.id);
-      const subpartSidesEntries = await Promise.all(
-        subpartIds.map(async (subpartId: string) => {
-          const res = await fetch(`/api/subpart-order?subpartId=${subpartId}`);
-          if (!res.ok) return [subpartId, []] as const;
-          const data = await res.json();
-          return [subpartId, data || []] as const;
-        })
+      const subpartIds = (Array.isArray(subpartsList) ? subpartsList : [])
+        .map((sub: any) => sub.id)
+        .filter(Boolean);
+      if (subpartIds.length === 0) {
+        setAllSubpartSides({});
+        return;
+      }
+
+      const subpartSidesRes = await fetch(
+        `/api/subpart-order?subpartIds=${encodeURIComponent(subpartIds.join(","))}`
       );
-      const subpartSidesMap: Record<string, any[]> = {};
-      subpartSidesEntries.forEach(([sid, list]) => {
-        subpartSidesMap[sid] = list;
-      });
+      const subpartSidesList = subpartSidesRes.ok ? await subpartSidesRes.json() : [];
+      const subpartSidesMap = (Array.isArray(subpartSidesList) ? subpartSidesList : []).reduce(
+        (acc: Record<string, any[]>, side: any) => {
+          const key = side?.subpart_id;
+          if (!key) return acc;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(side);
+          return acc;
+        },
+        {}
+      );
       setAllSubpartSides(subpartSidesMap);
     } catch (err) {
       console.error("Error fetching equipment parts:", err);
@@ -318,7 +337,7 @@ export function PositioningPanel({
     const interval = setInterval(() => {
       if (document.hidden) return;
       fetchRosterOnly();
-    }, 5000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [fetchRosterOnly]);
 
@@ -371,19 +390,22 @@ export function PositioningPanel({
         label: `Part: ${p.name}`,
       }));
 
-      const subpartsEntries = await Promise.all(
-        (partsData || []).map(async (p: any) => {
-          const subRes = await fetch(`/api/subparts?partId=${p.id}`);
-          if (!subRes.ok) return [];
+      const partIds = (partsData || []).map((p: any) => p.id).filter(Boolean);
+      const subpartOptions: Array<{ key: string; label: string }> = [];
+      if (partIds.length > 0) {
+        const subRes = await fetch(`/api/subparts?partIds=${encodeURIComponent(partIds.join(","))}`);
+        if (subRes.ok) {
           const subData = await subRes.json();
-          return (subData || []).map((s: any) => ({
-            key: `subpart:${s.id}`,
-            label: `Subpart: ${p.name} - ${s.title}`,
-          }));
-        })
-      );
-
-      const subpartOptions = subpartsEntries.flat();
+          const partNameById = new Map((partsData || []).map((p: any) => [p.id, p.name]));
+          (Array.isArray(subData) ? subData : []).forEach((s: any) => {
+            const partName = partNameById.get(s.part_id) || "Part";
+            subpartOptions.push({
+              key: `subpart:${s.id}`,
+              label: `Subpart: ${partName} - ${s.title}`,
+            });
+          });
+        }
+      }
       setSourceOptions([...partOptions, ...subpartOptions]);
     } catch (err) {
       console.error("Error loading position sources:", err);
@@ -416,8 +438,9 @@ export function PositioningPanel({
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      if (document.hidden) return;
       refreshSubpartsAndSources();
-    }, 3000);
+    }, 60000);
     return () => window.clearInterval(intervalId);
   }, [refreshSubpartsAndSources]);
 
@@ -1004,7 +1027,18 @@ export function PositioningPanel({
   const unassignedStartCount = sideItems.filter((item) => !item.start_side).length;
   const unassignedEndCount = sideItems.filter((item) => !item.end_side).length;
   const positionedStudents = new Set(activePositions.map((p) => p.student_id));
-  const availableStudents = roster;
+  const sortedRoster = useMemo(
+    () =>
+      [...roster].sort((a, b) => {
+        const nameCompare = (a.name || "").localeCompare(b.name || "", undefined, {
+          sensitivity: "base",
+        });
+        if (nameCompare !== 0) return nameCompare;
+        return (a.student_id || "").localeCompare(b.student_id || "");
+      }),
+    [roster]
+  );
+  const availableStudents = sortedRoster;
 
   // Generate legend with initials (deduplicated)
   const uniqueStudents = new Map<string, typeof positions[0]>();
@@ -2316,7 +2350,7 @@ export function PositioningPanel({
                             className="px-2 py-1 border border-gray-300 rounded text-xs"
                           >
                             <option value="">Select performer</option>
-                            {roster.map((student) => (
+                            {sortedRoster.map((student) => (
                               <option key={student.student_id} value={student.student_id}>
                                 {student.name}
                               </option>

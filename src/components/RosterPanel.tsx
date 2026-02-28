@@ -8,6 +8,7 @@ import { Rehearsal, RehearsalAttendance } from "@/types";
 
 interface RosterStudent {
   signup_id: string;
+  signup_created_at: string | null;
   student_id: string;
   name: string;
   email: string;
@@ -249,6 +250,16 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
     const rehearsalKey = normalizeDateOnly(rehearsal.date);
     return rehearsalKey > todayKey;
   };
+
+  const shouldDefaultAbsent = useCallback(
+    (student: RosterStudent, rehearsal: Rehearsal) => {
+      if (!student.signup_created_at) return false;
+      const signupKey = getDateKeyInTimeZone(student.signup_created_at, DEFAULT_TIMEZONE);
+      const rehearsalKey = normalizeDateOnly(rehearsal.date);
+      return rehearsalKey < signupKey;
+    },
+    [normalizeDateOnly]
+  );
 
   const formatRehearsalDate = (date: string) => {
     const local = toLocalDate(date);
@@ -501,7 +512,8 @@ export function RosterPanel({ performanceId }: RosterPanelProps) {
                       {sortedRehearsals.map((rehearsal) => {
                         const record = attendanceMap.get(`${rehearsal.id}:${student.student_id}`);
                         const isFuture = isFutureRehearsal(rehearsal);
-                        const status = record?.status ?? "pending";
+                        const status =
+                          record?.status ?? (shouldDefaultAbsent(student, rehearsal) ? "absent" : "pending");
                         const colorClass =
                           status === "present"
                             ? "bg-green-500 text-white border-green-600"

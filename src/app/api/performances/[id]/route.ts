@@ -1,6 +1,10 @@
 import { supabase } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
+const READ_CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=0, s-maxage=30, stale-while-revalidate=300",
+};
+
 // GET single performance with related data
 export async function GET(
   request: NextRequest,
@@ -42,12 +46,15 @@ export async function GET(
 
     if (countError) throw countError;
 
-    return NextResponse.json({
-      ...performance,
-      rehearsals,
-      parts,
-      signup_count: count || 0,
-    });
+    return NextResponse.json(
+      {
+        ...performance,
+        rehearsals,
+        parts,
+        signup_count: count || 0,
+      },
+      { headers: READ_CACHE_HEADERS }
+    );
   } catch (error) {
     console.error("Error fetching performance:", error);
     return NextResponse.json(

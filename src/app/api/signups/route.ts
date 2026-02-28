@@ -6,6 +6,14 @@ export async function GET(request: NextRequest) {
   try {
     const performanceId = request.nextUrl.searchParams.get("performanceId");
     const studentId = request.nextUrl.searchParams.get("studentId");
+    const studentIdsParam = request.nextUrl.searchParams.get("studentIds");
+    const includePerformance =
+      request.nextUrl.searchParams.get("includePerformance") === "1";
+
+    const studentIds = (studentIdsParam || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
 
     let query = supabase.from("student_signups").select("*");
 
@@ -16,12 +24,43 @@ export async function GET(request: NextRequest) {
     if (studentId) {
       query = query.eq("student_id", studentId);
     }
+    if (studentIds.length > 0) {
+      query = query.in("student_id", studentIds);
+    }
 
     const { data, error } = await query;
 
     if (error) throw error;
 
-    return NextResponse.json(data);
+    if (!includePerformance) {
+      return NextResponse.json(data);
+    }
+
+    const performanceIds = Array.from(
+      new Set((data || []).map((row: any) => row.performance_id).filter(Boolean))
+    );
+
+    if (performanceIds.length === 0) {
+      return NextResponse.json(data || []);
+    }
+
+    const { data: performances, error: perfError } = await supabase
+      .from("performances")
+      .select("*")
+      .in("id", performanceIds);
+
+    if (perfError) throw perfError;
+
+    const performanceById = new Map(
+      (performances || []).map((perf: any) => [perf.id, perf])
+    );
+
+    const enriched = (data || []).map((row: any) => ({
+      ...row,
+      performance: performanceById.get(row.performance_id) || null,
+    }));
+
+    return NextResponse.json(enriched);
   } catch (error) {
     console.error("Error fetching signups:", error);
     return NextResponse.json(
